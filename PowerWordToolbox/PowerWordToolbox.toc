@@ -1,0 +1,24 @@
+## Interface: 120001
+## Title: Power Word: Toolbox
+## Notes: Various Tooling for Discipline Priests
+## Author: Clandon
+## Version: 1.0.0
+## SavedVariables: PowerWordToolboxDB
+
+# Core — namespace, defaults, events, slash commands
+Core\Init.lua
+
+# Modules — feature logic (no UI)
+Modules\RaidFrames.lua
+Modules\PI.lua
+Modules\Atonement.lua
+Modules\Radiance.lua
+Modules\UtilityReminders.lua
+
+# Options — UI shell then each tab
+Options\UI.lua
+Options\General.lua
+Options\PI_Options.lua
+Options\Atonement_Options.lua
+Options\Radiance_Options.lua
+Options\UtilityReminders_Options.lua
