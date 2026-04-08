@@ -81,17 +81,35 @@ modRadCheck:SetPoint("TOPLEFT", modAtCheck, "BOTTOMLEFT", 0, -2)
 modRadCheck.text:SetText("Radiance Bars")
 modRadCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
 modRadCheck:SetScript("OnClick", function(self)
-    PWT.db.radiance.enabled = self:GetChecked()
-    if self:GetChecked() then
+    local enabled = self:GetChecked()
+    if not PWT.db.radiance then PWT.db.radiance = {} end
+    PWT.db.radiance.enabled = enabled
+    if enabled then
         if PWT.isDisc and PWT.Radiance then PWT.Radiance:ShowWidget() end
     else
         if PWT.Radiance then PWT.Radiance:HideWidget() end
     end
-    UI:SetTabEnabled("radiance", self:GetChecked())
+    UI:SetTabEnabled("radiance", enabled)
+end)
+
+local modVSCheck = CreateFrame("CheckButton", nil, genContent, "UICheckButtonTemplate")
+modVSCheck:SetPoint("TOPLEFT", modRadCheck, "BOTTOMLEFT", 0, -2)
+modVSCheck.text:SetText("Void Shield Deck Tracker")
+modVSCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
+modVSCheck:SetScript("OnClick", function(self)
+    local enabled = self:GetChecked()
+    if not PWT.db.voidShieldDeck then PWT.db.voidShieldDeck = {} end
+    PWT.db.voidShieldDeck.enabled = enabled
+    if enabled then
+        if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:ShowWidget() end
+    else
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:HideWidget() end
+    end
+    UI:SetTabEnabled("voidshield", enabled)
 end)
 
 local modURCheck = CreateFrame("CheckButton", nil, genContent, "UICheckButtonTemplate")
-modURCheck:SetPoint("TOPLEFT", modRadCheck, "BOTTOMLEFT", 0, -2)
+modURCheck:SetPoint("TOPLEFT", modVSCheck, "BOTTOMLEFT", 0, -2)
 modURCheck.text:SetText("Utility Reminders")
 modURCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
 modURCheck:SetScript("OnClick", function(self)
@@ -615,9 +633,11 @@ function UI:SyncGeneral()
     modPICheck:SetChecked(PWT.db.piEnabled)
     modAtCheck:SetChecked(PWT.db.atonement and PWT.db.atonement.enabled or false)
     modRadCheck:SetChecked(PWT.db.radiance and PWT.db.radiance.enabled or false)
+    modVSCheck:SetChecked(PWT.db.voidShieldDeck and PWT.db.voidShieldDeck.enabled or false)
     modURCheck:SetChecked(PWT.db.utilityReminders and PWT.db.utilityReminders.enabled or false)
     UI:SetTabEnabled("pi",        PWT.db.piEnabled)
     UI:SetTabEnabled("atonement", PWT.db.atonement and PWT.db.atonement.enabled or false)
     UI:SetTabEnabled("radiance",  PWT.db.radiance  and PWT.db.radiance.enabled  or false)
+    UI:SetTabEnabled("voidshield", PWT.db.voidShieldDeck and PWT.db.voidShieldDeck.enabled or false)
     UI:SetTabEnabled("utility",   PWT.db.utilityReminders and PWT.db.utilityReminders.enabled or false)
 end

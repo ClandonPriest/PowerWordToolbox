@@ -15,8 +15,8 @@ PWT.defaults = {
     piSequenceStickLast = false,
     piList              = {},
     piSequenceList      = {},
-    debug            = false,
-    debugModules     = { pi = true, atonement = true, radiance = true, ui = true },
+    debug            = true,
+    debugModules     = { pi = true, atonement = true, radiance = true, ui = true, voidshield = true },
     showChatMessages = true,
     showLoginMessage = true,
     font             = "Fonts\\FRIZQT__.TTF",
@@ -48,6 +48,38 @@ PWT.defaults = {
         showTimer   = true,
         barColor    = {1.0, 0.82, 0.0},
         textColor   = {1.0, 1.0, 1.0},
+    },
+    voidShieldDeck = {
+        enabled        = false,
+        chancePosX     = nil,
+        chancePosY     = nil,
+        deckPosX       = nil,
+        deckPosY       = nil,
+        cardsPosX      = nil,
+        cardsPosY      = nil,
+        showCards        = true,
+        cardsRotated     = false,
+        showChance       = true,
+        showDeck         = true,
+        showChanceLabel  = true,
+        showDeckLabel    = true,
+        chanceFontSize   = 18,
+        deckFontSize     = 18,
+        cardsSize        = 18,
+        chanceStrata     = "MEDIUM",
+        deckStrata       = "MEDIUM",
+        cardsStrata      = "MEDIUM",
+        -- Proc icon alert
+        procAlertEnabled = false,
+        procAlertPosX    = nil,
+        procAlertPosY    = nil,
+        procAlertSize    = 64,
+        procAlertStrata  = "HIGH",
+        -- Proc sound alert
+        procSoundEnabled = false,
+        procSoundIndex   = 5,
+        procSoundVolume  = 1.0,
+        procSoundChannel = "SFX",
     },
     atonement = {
         enabled       = false,
@@ -120,6 +152,7 @@ function PWT:CheckSpec()
     if PWT.UI then PWT.UI:UpdateTabVisibility() end
     if not self.isDisc and PWT.Atonement then PWT.Atonement:HideWidget() end
     if not self.isDisc and PWT.Radiance  then PWT.Radiance:HideWidget()  end
+    if not self.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:HideWidget() end
 end
 
 -- ============================================================
@@ -173,6 +206,37 @@ local function MigrateDB()
         if r.textColor   == nil then r.textColor   = {1.0, 1.0, 1.0}  end
     end
     if db.debugModules.radiance == nil then db.debugModules.radiance = true end
+
+    if not db.voidShieldDeck then
+        db.voidShieldDeck = CopyTable(PWT.defaults.voidShieldDeck)
+    else
+        local vs = db.voidShieldDeck
+        if vs.enabled    == nil then vs.enabled    = false end
+        if vs.showCards       == nil then vs.showCards       = true  end
+        if vs.cardsRotated    == nil then vs.cardsRotated    = false end
+        if vs.showChance      == nil then vs.showChance      = true end
+        if vs.showDeck        == nil then vs.showDeck        = true end
+        if vs.showChanceLabel == nil then vs.showChanceLabel = true end
+        if vs.showDeckLabel   == nil then vs.showDeckLabel   = true end
+        -- fontSize was split into per-widget sizes; migrate old value then drop key
+        if vs.chanceFontSize == nil then vs.chanceFontSize = vs.fontSize or 18 end
+        if vs.deckFontSize   == nil then vs.deckFontSize   = vs.fontSize or 18 end
+        vs.fontSize = nil
+        if vs.cardsSize        == nil then vs.cardsSize        = 18      end
+        if vs.chanceStrata     == nil then vs.chanceStrata     = "MEDIUM" end
+        if vs.deckStrata       == nil then vs.deckStrata       = "MEDIUM" end
+        if vs.cardsStrata      == nil then vs.cardsStrata      = "MEDIUM" end
+        if vs.procAlertEnabled == nil then vs.procAlertEnabled = false    end
+        if vs.procAlertSize    == nil then vs.procAlertSize    = 64       end
+        if vs.procAlertStrata  == nil then vs.procAlertStrata  = "HIGH"   end
+        if vs.procSoundEnabled == nil then vs.procSoundEnabled = false    end
+        if vs.procSoundIndex   == nil then vs.procSoundIndex   = 5        end
+        if vs.procSoundVolume  == nil then vs.procSoundVolume  = 1.0      end
+        if vs.procSoundChannel == nil then vs.procSoundChannel = "SFX"    end
+        -- posX/posY were replaced by per-element positions; remove legacy keys
+        vs.posX = nil
+        vs.posY = nil
+    end
 
     if not db.atonement then
         db.atonement = CopyTable(PWT.defaults.atonement)
@@ -230,6 +294,7 @@ frame:RegisterEvent("UNIT_AURA")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("ENCOUNTER_START")
+frame:RegisterEvent("CHALLENGE_MODE_START")
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -259,6 +324,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if PWT.PI then PWT.PI:OnLogin() end
         if PWT.isDisc and PWT.Atonement then PWT.Atonement:OnLogin() end
         if PWT.isDisc and PWT.Radiance  then PWT.Radiance:OnLogin()  end
+        if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnLogin() end
         if PWT.UtilityReminders then PWT.UtilityReminders:OnLogin() end
 
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
@@ -266,6 +332,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         PWT:CheckSpec()
         if PWT.isDisc and PWT.Atonement then PWT.Atonement:OnLogin() end
         if PWT.isDisc and PWT.Radiance  then PWT.Radiance:OnLogin()  end
+        if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnLogin() end
 
     elseif event == "PLAYER_TALENT_UPDATE" or event == "TRAIT_CONFIG_UPDATED" then
         PWT:Debug("Talent event fired: " .. event, "radiance")
@@ -280,6 +347,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
         local unit, _, spellID = ...
         if PWT.PI then PWT.PI:OnSpellCast(unit, spellID) end
         if PWT.isDisc and PWT.Radiance then PWT.Radiance:OnSpellCast(unit, spellID) end
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnSpellCast(unit, spellID) end
 
     elseif event == "PLAYER_REGEN_ENABLED" then
         if not PWT.isPriest then return end
@@ -298,6 +366,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "ENCOUNTER_START" then
         if PWT.PI then PWT.PI:OnEncounterStart() end
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnEncounterStart() end
+
+    elseif event == "CHALLENGE_MODE_START" then
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnChallengeModeStart() end
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         if PWT.isDisc and PWT.Atonement then
@@ -345,6 +417,7 @@ SlashCmdList["PWTB"] = function(msg)
         if PWT.PI then PWT.PI:PrintStatus() end
         if PWT.Radiance  then PWT.Radiance:PrintStatus()  end
         if PWT.Atonement then PWT.Atonement:PrintStatus() end
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:PrintStatus() end
         PWT:Print("LibSharedMedia: " ..
             (LSM and "|cff00ff00available|r" or "|cffff4444not found|r"))
         PWT:Print("Raid frames: Grid2="    .. tostring(Grid2Frame ~= nil) ..

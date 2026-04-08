@@ -13,6 +13,7 @@ Modules\RaidFrames.lua
 Modules\PI.lua
 Modules\Atonement.lua
 Modules\Radiance.lua
+Modules\VoidShieldDeck.lua
 Modules\UtilityReminders.lua
 
 # Options — UI shell then each tab
@@ -21,4 +22,5 @@ Options\General.lua
 Options\PI_Options.lua
 Options\Atonement_Options.lua
 Options\Radiance_Options.lua
+Options\VoidShieldDeck_Options.lua
 Options\UtilityReminders_Options.lua

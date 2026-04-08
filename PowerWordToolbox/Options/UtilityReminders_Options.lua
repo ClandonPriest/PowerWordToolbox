@@ -11,7 +11,7 @@ local UR  = PWT.UtilityReminders
 local C   = UI.C
 local PAD = UI.PAD
 
-local urPanel = UI:AddTab("utility", "Reminders", 5)
+local urPanel = UI:AddTab("utility", "Reminders", 6)
 
 -- ── Scroll wrapper ────────────────────────────────────────────
 local urScroll = CreateFrame("ScrollFrame", nil, urPanel)

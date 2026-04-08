@@ -14,13 +14,13 @@ local UI = PWT.UI
 --  Layout Constants (shared by all Options/ files)
 -- ============================================================
 
-UI.FRAME_W   = 460
+UI.FRAME_W   = 800
 UI.FRAME_H   = 600
 UI.PAD       = 16
 UI.TITLE_H   = 36
-UI.TAB_BAR_H = 36
+UI.TAB_BAR_W = 120
 UI.FOOTER_H  = 44
-UI.CONTENT_Y = UI.TITLE_H + UI.TAB_BAR_H
+UI.CONTENT_Y = UI.TITLE_H
 
 -- ============================================================
 --  Colour Palette (shared by all Options/ files)
@@ -86,6 +86,7 @@ function UI:ApplyFont(path)
     PWT_FontSmall:SetFont(path, 11, "")
     if PWT.Atonement then PWT.Atonement:UpdateWidget() end
     if PWT.PI       then PWT.PI:UpdateOverlayFont()   end
+    if PWT.VoidShieldDeck then PWT.VoidShieldDeck:UpdateWidget() end
 end
 
 -- ============================================================
@@ -99,8 +100,8 @@ local activeTab = nil
 UI.tabs      = tabs
 UI.tabPanels = tabPanels
 
-local TAB_W = 90
-local TAB_H  -- set after TAB_BAR_H is known
+local TAB_W = 104
+local TAB_H = 26
 
 local function SwitchTab(name)
     if tabDisabledState[name] then return end
@@ -124,7 +125,7 @@ local function SwitchTab(name)
             tab.label:SetTextColor(0.78, 0.75, 0.85, 1.0)
             tab.accent:Hide()
         end
-        -- disabled tabs: leave their visual state untouched
+        tab:EnableMouse(not tabDisabledState[tabName])
     end
     for panelName, panel in pairs(tabPanels) do
         if panelName == name then panel:Show() else panel:Hide() end
@@ -136,16 +137,16 @@ local function SwitchTab(name)
     if name == "pi"         and UI.SyncPI                then UI:SyncPI() end
     if name == "atonement"  and UI.SyncAtonement         then UI:SyncAtonement() end
     if name == "radiance"   and UI.SyncRadiance          then UI:SyncRadiance() end
+    if name == "voidshield" and UI.SyncVoidShield        then UI:SyncVoidShield() end
     if name == "utility"    and UI.SyncUtilityReminders  then UI:SyncUtilityReminders() end
 end
 UI.SwitchTab = SwitchTab
 
 function UI:AddTab(name, label, index)
     local C  = self.C
-    TAB_H    = TAB_H or (self.TAB_BAR_H - 4)
     local tab = CreateFrame("Button", nil, self.tabBar)
     tab:SetSize(TAB_W, TAB_H)
-    tab:SetPoint("LEFT", self.tabBar, "LEFT", (index - 1) * TAB_W + 4, 0)
+    tab:SetPoint("TOPLEFT", self.tabBar, "TOPLEFT", 8, -6 - (index - 1) * (TAB_H + 4))
 
     tab.bg = tab:CreateTexture(nil, "BACKGROUND")
     tab.bg:SetAllPoints(tab)
@@ -163,7 +164,10 @@ function UI:AddTab(name, label, index)
     tab.label:SetText(label)
     tab.label:SetTextColor(0.78, 0.75, 0.85, 1.0)  -- readable-but-inactive (brighter than textMuted)
 
-    tab:SetScript("OnClick", function() SwitchTab(name) end)
+    tab:SetScript("OnClick", function()
+        PWT:Debug("Tab clicked: " .. name .. "  disabled=" .. tostring(tabDisabledState[name]))
+        SwitchTab(name)
+    end)
     tab:SetScript("OnEnter", function(self)
         if tabDisabledState[name] then return end
         if activeTab ~= name then
@@ -179,6 +183,9 @@ function UI:AddTab(name, label, index)
         end
     end)
 
+    tab:RegisterForClicks("LeftButtonUp")
+    tab:EnableMouse(true)
+
     local panel = CreateFrame("Frame", nil, self.contentArea)
     panel:SetAllPoints(self.contentArea)
     panel:Hide()
@@ -191,21 +198,25 @@ end
 function UI:SetTabEnabled(name, enabled)
     local tab = tabs[name]
     if not tab then return end
+    PWT:Debug("SetTabEnabled: " .. name .. " -> " .. tostring(enabled))
     local C = UI.C
     tabDisabledState[name] = not enabled
     if enabled then
-        local isActive = (activeTab == name)
-        if isActive then
+        tab:EnableMouse(true)
+        tab:SetAlpha(1.0)
+        tab.bg:SetColorTexture(C.tabBar[1], C.tabBar[2], C.tabBar[3], C.tabBar[4])
+        tab.label:SetTextColor(0.78, 0.75, 0.85, 1.0)
+        tab.accent:Hide()
+        -- Apply active highlighting if this is the current tab
+        if activeTab == name then
             tab.bg:SetColorTexture(C.tabActive[1], C.tabActive[2], C.tabActive[3], C.tabActive[4])
             tab.label:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
             tab.accent:Show()
-        else
-            tab.bg:SetColorTexture(C.tabBar[1], C.tabBar[2], C.tabBar[3], C.tabBar[4])
-            tab.label:SetTextColor(0.78, 0.75, 0.85, 1.0)
-            tab.accent:Hide()
         end
     else
         -- Disabled: dark red-tinted background, dim text.
+        tab:EnableMouse(false)
+        tab:SetAlpha(0.65)
         tab.bg:SetColorTexture(0.09, 0.05, 0.05, 1.0)
         tab.label:SetTextColor(0.52, 0.34, 0.34, 1.0)
         tab.accent:Hide()
@@ -213,6 +224,16 @@ function UI:SetTabEnabled(name, enabled)
             SwitchTab("general")
         end
     end
+end
+
+function UI:RefreshTabStates()
+    if not PWT.db then return end
+    PWT:Debug("RefreshTabStates called")
+    UI:SetTabEnabled("pi",        PWT.db.piEnabled)
+    UI:SetTabEnabled("atonement", PWT.db.atonement and PWT.db.atonement.enabled or false)
+    UI:SetTabEnabled("radiance",  PWT.db.radiance  and PWT.db.radiance.enabled  or false)
+    UI:SetTabEnabled("voidshield", PWT.db.voidShieldDeck and PWT.db.voidShieldDeck.enabled or false)
+    UI:SetTabEnabled("utility",   PWT.db.utilityReminders and PWT.db.utilityReminders.enabled or false)
 end
 
 function UI:UpdateTabVisibility()
@@ -224,6 +245,9 @@ function UI:UpdateTabVisibility()
     end
     if tabs["radiance"] then
         tabs["radiance"]:SetShown(PWT.isDisc)
+    end
+    if tabs["voidshield"] then
+        tabs["voidshield"]:SetShown(PWT.isDisc)
     end
 end
 
@@ -237,13 +261,12 @@ UI.optionsFrame = optionsFrame
 local C = UI.C
 local PAD      = UI.PAD
 local TITLE_H  = UI.TITLE_H
-local TAB_BAR_H_val = UI.TAB_BAR_H
+local TAB_BAR_W_val = UI.TAB_BAR_W
 local FOOTER_H = UI.FOOTER_H
 local CONTENT_Y = UI.CONTENT_Y
 local FRAME_W  = UI.FRAME_W
 local FRAME_H  = UI.FRAME_H
 
-optionsFrame:SetSize(FRAME_W, FRAME_H)
 optionsFrame:SetPoint("CENTER")
 table.insert(UISpecialFrames, "PowerWordToolboxOptions")
 optionsFrame:SetMovable(true)
@@ -260,7 +283,10 @@ optionsFrame:SetScript("OnMouseDown", function()
 end)
 optionsFrame:SetFrameStrata("DIALOG")
 optionsFrame:SetResizable(true)
-optionsFrame:SetResizeBounds(360, 500)
+optionsFrame:SetResizeBounds(600, 500)
+PWT:Debug("UI.FRAME_W at creation: " .. tostring(UI.FRAME_W) .. ", FRAME_W local: " .. tostring(FRAME_W))
+optionsFrame:SetSize(FRAME_W, FRAME_H)
+PWT:Debug("Options frame after SetSize: " .. optionsFrame:GetWidth() .. "x" .. optionsFrame:GetHeight())
 optionsFrame:Hide()
 
 -- Resize grip — parented to UIParent so footer/piFooterControls frames can never sit above it
@@ -336,18 +362,18 @@ resetWinBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 -- Tab bar
 local tabBar = CreateFrame("Frame", nil, optionsFrame)
-tabBar:SetPoint("TOPLEFT",  optionsFrame, "TOPLEFT",  0, -TITLE_H - 2)
-tabBar:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", 0, -TITLE_H - 2)
-tabBar:SetHeight(TAB_BAR_H_val)
-UI:MakeBg(tabBar, C.tabBar)
-UI.tabBar = tabBar
-local tabBarLine = UI:MakeLine(optionsFrame, C.border, 1)
-tabBarLine:SetPoint("TOPLEFT",  optionsFrame, "TOPLEFT",  0, -(TITLE_H + TAB_BAR_H_val + 2))
-tabBarLine:SetPoint("TOPRIGHT", optionsFrame, "TOPRIGHT", 0, -(TITLE_H + TAB_BAR_H_val + 2))
+tabBar:SetPoint("TOPLEFT", optionsFrame, "TOPLEFT", 0, -TITLE_H - 2)
+    tabBar:SetPoint("BOTTOMLEFT", optionsFrame, "BOTTOMLEFT", 0, FOOTER_H)
+    tabBar:SetWidth(TAB_BAR_W_val)
+    UI:MakeBg(tabBar, C.tabBar)
+    UI.tabBar = tabBar
+    local tabBarLine = UI:MakeLine(optionsFrame, C.border, 1)
+    tabBarLine:SetPoint("TOPRIGHT", tabBar, "TOPRIGHT", 0, 0)
+    tabBarLine:SetPoint("BOTTOMRIGHT", tabBar, "BOTTOMRIGHT", 0, 0)
 
 -- Content area
 local contentArea = CreateFrame("Frame", nil, optionsFrame)
-contentArea:SetPoint("TOPLEFT",     optionsFrame, "TOPLEFT",     0, -(CONTENT_Y + 3))
+contentArea:SetPoint("TOPLEFT",     tabBar, "TOPRIGHT", 0, 0)
 contentArea:SetPoint("BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", 0, FOOTER_H)
 UI.contentArea = contentArea
 
@@ -385,6 +411,9 @@ function UI:Toggle()
             optionsFrame:ClearAllPoints()
             optionsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         end
+        optionsFrame:SetSize(FRAME_W, FRAME_H)
+        PWT:Debug("Force options frame size on show: " .. FRAME_W .. "x" .. FRAME_H)
+        PWT:Debug("Showing options window, current size: " .. optionsFrame:GetWidth() .. "x" .. optionsFrame:GetHeight())
         optionsFrame:Show()
     end
 end
@@ -407,5 +436,6 @@ function UI:RefreshPI()
 end
 
 optionsFrame:SetScript("OnShow", function()
+    if UI.RefreshTabStates then UI:RefreshTabStates() end
     SwitchTab(activeTab or "general")
 end)
