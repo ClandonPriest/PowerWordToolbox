@@ -16,7 +16,7 @@ PWT.defaults = {
     piList              = {},
     piSequenceList      = {},
     debug            = true,
-    debugModules     = { pi = true, atonement = true, radiance = true, ui = true, voidshield = true },
+    debugModules     = { pi = true, atonement = true, radiance = true, ui = true, voidshield = true, utility = true },
     showChatMessages = true,
     showLoginMessage = true,
     font             = "Fonts\\FRIZQT__.TTF",
@@ -58,6 +58,7 @@ PWT.defaults = {
         cardsPosX      = nil,
         cardsPosY      = nil,
         showCards        = true,
+        patternResync    = false,
         cardsRotated     = false,
         showChance       = true,
         showDeck         = true,
@@ -80,6 +81,10 @@ PWT.defaults = {
         procSoundIndex   = 5,
         procSoundVolume  = 1.0,
         procSoundChannel = "SFX",
+        -- Reload state persistence (written on PLAYER_LOGOUT, consumed on reload)
+        savedCardsRemaining = nil,
+        savedProcAvailable  = nil,
+        savedCastHistory    = nil,
     },
     atonement = {
         enabled       = false,
@@ -176,6 +181,8 @@ local function MigrateDB()
         if db.debugModules.pi        == nil then db.debugModules.pi        = true end
         if db.debugModules.atonement == nil then db.debugModules.atonement = true end
         if db.debugModules.ui        == nil then db.debugModules.ui        = true end
+        if db.debugModules.voidshield == nil then db.debugModules.voidshield = true end
+        if db.debugModules.utility   == nil then db.debugModules.utility   = true end
     end
 
     if not db.pi then
@@ -213,6 +220,7 @@ local function MigrateDB()
         local vs = db.voidShieldDeck
         if vs.enabled    == nil then vs.enabled    = false end
         if vs.showCards       == nil then vs.showCards       = true  end
+        if vs.patternResync   == nil then vs.patternResync   = false end
         if vs.cardsRotated    == nil then vs.cardsRotated    = false end
         if vs.showChance      == nil then vs.showChance      = true end
         if vs.showDeck        == nil then vs.showDeck        = true end
@@ -233,6 +241,8 @@ local function MigrateDB()
         if vs.procSoundIndex   == nil then vs.procSoundIndex   = 5        end
         if vs.procSoundVolume  == nil then vs.procSoundVolume  = 1.0      end
         if vs.procSoundChannel == nil then vs.procSoundChannel = "SFX"    end
+        -- savedCardsRemaining/savedProcAvailable/savedCastHistory intentionally
+        -- left nil here; they are written by SaveState and consumed by OnEnteringWorld.
         -- posX/posY were replaced by per-element positions; remove legacy keys
         vs.posX = nil
         vs.posY = nil
@@ -295,6 +305,7 @@ frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("ENCOUNTER_START")
 frame:RegisterEvent("CHALLENGE_MODE_START")
+frame:RegisterEvent("PLAYER_LOGOUT")
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -371,7 +382,14 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "CHALLENGE_MODE_START" then
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnChallengeModeStart() end
 
+    elseif event == "PLAYER_LOGOUT" then
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:SaveState() end
+
     elseif event == "PLAYER_ENTERING_WORLD" then
+        local _, isReload = ...
+        if PWT.isDisc and PWT.VoidShieldDeck then
+            PWT.VoidShieldDeck:OnEnteringWorld(isReload)
+        end
         if PWT.isDisc and PWT.Atonement then
             PWT:Debug("Entering world, rescanning Atonement.")
             PWT.Atonement:ScanAll()

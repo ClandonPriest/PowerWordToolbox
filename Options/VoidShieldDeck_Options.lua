@@ -831,6 +831,28 @@ procChanBtn:SetScript("OnClick", function(self)
     procChanPopup:Show()
 end)
 
+-- ─────────────────────────────────────────────────────────────
+--  SECTION: Accuracy
+-- ─────────────────────────────────────────────────────────────
+
+local accuracyHdr, accuracyRule = MakeSectionHeader(vsContent, procChanRow, -18, "Accuracy")
+
+local patternResyncCheck = CreateFrame("CheckButton", nil, vsContent, "UICheckButtonTemplate")
+patternResyncCheck:SetPoint("TOPLEFT", accuracyRule, "BOTTOMLEFT", 0, -10)
+patternResyncCheck.text:SetText("Attempt to re-sync via pattern matching (work in progress)")
+patternResyncCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
+patternResyncCheck:SetScript("OnClick", function(self)
+    if not PWT.db then return end
+    PWT.db.voidShieldDeck.patternResync = self:GetChecked()
+end)
+
+local patternResyncDesc = vsContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
+patternResyncDesc:SetPoint("TOPLEFT", patternResyncCheck, "BOTTOMLEFT", 0, -2)
+patternResyncDesc:SetWidth(FRAME_W - PAD * 2)
+patternResyncDesc:SetJustifyH("LEFT")
+patternResyncDesc:SetText("Detects back-to-back procs and 4 consecutive no-procs to infer and correct deck state drift. Experimental.")
+patternResyncDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+
 -- ── Sync ──────────────────────────────────────────────────────
 
 function UI:SyncVoidShield()
@@ -842,6 +864,7 @@ function UI:SyncVoidShield()
     deckLabelCheck:SetChecked(cfg.showDeckLabel ~= false)
     cardsCheck:SetChecked(cfg.showCards ~= false)
     cardsRotateCheck:SetChecked(cfg.cardsRotated == true)
+    patternResyncCheck:SetChecked(cfg.patternResync == true)
     chanceFontBox:SetText(tostring(cfg.chanceFontSize or 18))
     deckFontBox:SetText(tostring(cfg.deckFontSize or 18))
     cardsSizeSlider:SetValue(cfg.cardsSize or 18)

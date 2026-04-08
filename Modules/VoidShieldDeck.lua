@@ -73,6 +73,11 @@ local cardTextures = {}
 local pendingTimer = nil
 local pwsSlot      = nil   -- action-bar slot that holds PWS / Void Shield
 
+-- Rolling history of the last 4 cast outcomes (true=proc, false=no-proc).
+-- Survives natural deck resets so cross-deck desync scenarios can be detected.
+-- Cleared on login / encounter / challenge resets.
+local castHistory = {}
+
 -- ── Sound list (built lazily, shared with Options) ────────────
 local soundList = {}
 VSD.soundList   = soundList
@@ -117,16 +122,11 @@ local function FindPWSSlot()
     for slot = 1, 180 do
         local actionType, id = GetActionInfo(slot)
         if actionType == "spell" and (id == PWS_SPELL_ID or id == PWS_PROC_SPELL_ID) then
-            PWT:Debug("VSD: PWS found via GetActionInfo – slot=" .. slot .. " spellID=" .. id, "voidshield")
             return slot
         end
     end
-    local frameTex = ScanButtonFrames()
-    if frameTex then
-        PWT:Debug("VSD: GetActionInfo found nothing, but ScanButtonFrames found texture=" .. tostring(frameTex) .. ". Will use frame scan for proc detection.", "voidshield")
-    else
-        PWT:Debug("VSD: PWS not found by GetActionInfo OR ScanButtonFrames – is PWS on an action bar?", "voidshield")
-    end
+    -- Neither GetActionInfo nor frame scan found PWS — alert the user.
+    PWT:Debug("Void Shield: Power Word: Shield not found on any action bar. Place PWS on your bars for accurate proc tracking.", "voidshield")
     return nil
 end
 
@@ -134,26 +134,12 @@ local function IsProcTextureActive()
     local tex
     if pwsSlot then
         tex = GetActionTexture(pwsSlot)
-        if not tex then
-            PWT:Debug("VSD: GetActionTexture(slot=" .. pwsSlot .. ") returned nil – falling back to ScanButtonFrames.", "voidshield")
-            tex = ScanButtonFrames()
-        end
+        if not tex then tex = ScanButtonFrames() end
     else
-        PWT:Debug("VSD: pwsSlot nil – using ScanButtonFrames.", "voidshield")
         tex = ScanButtonFrames()
     end
-
-    if not tex then
-        PWT:Debug("VSD: No PWS/VoidShield texture found by any method.", "voidshield")
-        return false
-    end
-
-    local isProc = (tex == PROC_TEXTURE_ID)
-    PWT:Debug("VSD: texture=" .. tostring(tex)
-        .. "  base=" .. BASE_SLOT_TEXTURE
-        .. "  proc=" .. PROC_TEXTURE_ID
-        .. "  isProc=" .. tostring(isProc), "voidshield")
-    return isProc
+    if not tex then return false end
+    return (tex == PROC_TEXTURE_ID)
 end
 
 -- ─────────────────────────────────────────────────────────────
@@ -174,9 +160,67 @@ function VSD:ResetDeck(reason)
         pendingTimer:Cancel()
         pendingTimer = nil
     end
+    if reason ~= "deck empty" then
+        wipe(castHistory)
+    end
     self:HideProcAlert()
     self:UpdateWidget()
-    PWT:Debug("VSD deck reset" .. (reason and (" – " .. reason) or "") .. ".", "voidshield")
+end
+
+-- Record one outcome into the rolling 4-entry history.
+local function RecordOutcome(didProc)
+    castHistory[#castHistory + 1] = didProc
+    if #castHistory > 4 then table.remove(castHistory, 1) end
+end
+
+-- Check whether the two cross-deck resync scenarios are present in history and,
+-- if the current deck state contradicts what those scenarios imply, correct it.
+--
+-- Scenario A – back-to-back procs:
+--   Only possible as the LAST draw of deck N (proc) followed by the FIRST draw
+--   of deck N+1 (proc).  After both casts the state must be:
+--   cardsRemaining=2, procAvailable=false.
+--
+-- Scenario B – four consecutive no-procs:
+--   Only possible as the last TWO draws of deck N (proc was position 1, leaving
+--   two red cards) followed by the first TWO draws of deck N+1 (proc is
+--   position 3).  After all four casts the state must be:
+--   cardsRemaining=1, procAvailable=true.
+function VSD:CheckDesync()
+    if not (PWT.db and PWT.db.voidShieldDeck and PWT.db.voidShieldDeck.patternResync) then return end
+    local h = castHistory
+    local n = #h
+
+    -- Scenario A: last two outcomes are both proc.
+    if n >= 2 and h[n] == true and h[n-1] == true then
+        local expRemaining, expProc = 2, false
+        PWT:Print("Void Shield: back-to-back proc pattern detected – fixing deck to correct state.")
+        if self.cardsRemaining ~= expRemaining or self.procAvailable ~= expProc then
+            self.cardsRemaining = expRemaining
+            self.procAvailable  = expProc
+            self:UpdateWidget()
+            PWT:Print("Void Shield deck resynced: corrected to "
+                .. expRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
+        end
+        return
+    end
+
+    -- Scenario B: last four outcomes are all no-proc.
+    if n >= 4
+        and h[n]   == false and h[n-1] == false
+        and h[n-2] == false and h[n-3] == false
+    then
+        local expRemaining, expProc = 1, true
+        PWT:Print("Void Shield: 4 consecutive no-proc pattern detected – fixing deck to correct state.")
+        if self.cardsRemaining ~= expRemaining or self.procAvailable ~= expProc then
+            self.cardsRemaining = expRemaining
+            self.procAvailable  = expProc
+            self:UpdateWidget()
+            PWT:Print("Void Shield deck resynced: corrected to "
+                .. expRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
+        end
+        return
+    end
 end
 
 function VSD:ApplyCastResult(didProc)
@@ -188,72 +232,67 @@ function VSD:ApplyCastResult(didProc)
 
     if didProc then
         self.procAvailable = false
+        PWT:Debug("Void Shield proc detected. Cards remaining: " .. (self.cardsRemaining - 1) .. "/" .. MAX_CARDS, "voidshield")
         if PWT.db and PWT.db.voidShieldDeck then
             local cfg = PWT.db.voidShieldDeck
-            if cfg.procAlertEnabled  then self:ShowProcAlert()  end
-            if cfg.procSoundEnabled  then self:PlayProcSound()  end
+            if cfg.procAlertEnabled then self:ShowProcAlert() end
+            if cfg.procSoundEnabled then self:PlayProcSound() end
         end
     end
     self.cardsRemaining = math.max(0, self.cardsRemaining - 1)
 
-    PWT:Debug("VSD: ApplyCastResult didProc=" .. tostring(didProc)
-        .. "  cardsRemaining=" .. self.cardsRemaining
-        .. "  procAvailable="  .. tostring(self.procAvailable), "voidshield")
+    -- Record the outcome AFTER state is updated so CheckDesync sees current values.
+    RecordOutcome(didProc)
+    do
+        local parts = {}
+        for i, v in ipairs(castHistory) do parts[i] = v and "P" or "N" end
+        PWT:Debug("Void Shield cast history: [" .. table.concat(parts, ", ") .. "]", "voidshield")
+    end
 
     if self.cardsRemaining == 0 then
+        -- Check patterns before resetting — history still contains this outcome.
+        self:CheckDesync()
+        -- Deck exhausted naturally; history is preserved across the reset.
         self:ResetDeck("deck empty")
     else
+        self:CheckDesync()
         self:UpdateWidget()
     end
 end
 
 function VSD:CheckForProc()
     if not self.awaitingOutcome then return end
-    PWT:Debug("VSD: CheckForProc called (awaitingOutcome=true)", "voidshield")
     if IsProcTextureActive() then
-        PWT:Debug("VSD: Proc texture confirmed – applying proc result.", "voidshield")
         self:ApplyCastResult(true)
-    else
-        PWT:Debug("VSD: No proc texture – cast did not proc.", "voidshield")
     end
 end
 
 function VSD:OnPenanceCast()
-    PWT:Debug("VSD: Penance cast detected. procAvailable=" .. tostring(self.procAvailable)
-        .. "  cardsRemaining=" .. self.cardsRemaining, "voidshield")
-
     if not self.procAvailable then
         self.cardsRemaining = math.max(0, self.cardsRemaining - 1)
-        PWT:Debug("VSD: Proc not available – consumed no-proc card. cardsRemaining=" .. self.cardsRemaining, "voidshield")
+        RecordOutcome(false)
         if self.cardsRemaining == 0 then
             self:ResetDeck("deck empty")
         else
+            self:CheckDesync()
             self:UpdateWidget()
         end
         return
     end
 
-    if not pwsSlot then
-        PWT:Debug("VSD: pwsSlot not cached, searching now.", "voidshield")
-        pwsSlot = FindPWSSlot()
-    end
+    if not pwsSlot then pwsSlot = FindPWSSlot() end
 
     self.awaitingOutcome = true
     self.pendingCastID   = self.pendingCastID + 1
     local castID         = self.pendingCastID
-    PWT:Debug("VSD: Awaiting outcome for castID=" .. castID .. " (timeout=" .. OUTCOME_TIMEOUT .. "s)", "voidshield")
 
     if pendingTimer then pendingTimer:Cancel() end
     pendingTimer = C_Timer.NewTimer(OUTCOME_TIMEOUT, function()
         if self.awaitingOutcome and self.pendingCastID == castID then
-            PWT:Debug("VSD: Timeout fired for castID=" .. castID .. " – running final proc check.", "voidshield")
             self:CheckForProc()
             if self.awaitingOutcome then
-                PWT:Debug("VSD: Still unresolved after timeout – applying no-proc.", "voidshield")
                 self:ApplyCastResult(false)
             end
-        else
-            PWT:Debug("VSD: Timeout fired but stale (castID=" .. castID .. " current=" .. self.pendingCastID .. ") – ignoring.", "voidshield")
         end
     end)
 end
@@ -512,11 +551,9 @@ function VSD:PlayProcSound()
     local prev  = GetCVar("Sound_SFXVolume")
     SetCVar("Sound_SFXVolume", tostring(vol))
     if entry and entry.sType == "lsm" then
-        PWT:Debug("VSD proc sound LSM: " .. entry.label, "voidshield")
         PlaySoundFile(entry.path, chan)
     else
         local preset = VSD_SOUNDS[idx] or VSD_SOUNDS[5]
-        PWT:Debug("VSD proc sound preset: " .. preset.label, "voidshield")
         PlaySound(preset.id, chan, false)
     end
     C_Timer.After(0.5, function() SetCVar("Sound_SFXVolume", prev) end)
@@ -590,9 +627,7 @@ function VSD:ShowProcAlert()
     if procAlertTimer then procAlertTimer:Cancel() end
     procAlertTimer = C_Timer.NewTimer(PROC_ALERT_TIMEOUT, function()
         self:HideProcAlert()
-        PWT:Debug("VSD: proc alert auto-dismissed after " .. PROC_ALERT_TIMEOUT .. "s.", "voidshield")
     end)
-    PWT:Debug("VSD: proc alert shown.", "voidshield")
 end
 
 -- Show a non-timed preview so the user can position the frame from options.
@@ -666,10 +701,64 @@ function VSD:OnSpellCast(unit, spellID)
     C_Timer.After(0.05, function() self:CheckForProc() end)
 end
 
+-- Write current deck state to SavedVariables before the session ends.
+-- Only meaningful for /reload — a DC never reaches this path.
+function VSD:SaveState()
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    local vs = PWT.db.voidShieldDeck
+    vs.savedCardsRemaining = self.cardsRemaining
+    vs.savedProcAvailable  = self.procAvailable
+    -- Deep-copy so the saved table is independent of the live one.
+    vs.savedCastHistory    = {}
+    for i, v in ipairs(castHistory) do vs.savedCastHistory[i] = v end
+end
+
+-- Restore deck state that was written by SaveState on the previous session.
+-- Clears the saved fields afterwards so they are not reused on a real login.
+function VSD:RestoreState()
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    local vs = PWT.db.voidShieldDeck
+    self.cardsRemaining = vs.savedCardsRemaining
+    self.procAvailable  = vs.savedProcAvailable
+    wipe(castHistory)
+    if vs.savedCastHistory then
+        for i, v in ipairs(vs.savedCastHistory) do castHistory[i] = v end
+    end
+    -- Consume the saved state so it is not reapplied on a subsequent real login.
+    vs.savedCardsRemaining = nil
+    vs.savedProcAvailable  = nil
+    vs.savedCastHistory    = nil
+    PWT:Print("Void Shield deck state restored after reload: "
+        .. self.cardsRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
+end
+
+-- Called from PLAYER_ENTERING_WORLD.  isReload is true for /reload, false for
+-- a fresh login.  On reload we restore saved state; on login we reset normally.
+function VSD:OnEnteringWorld(isReload)
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    local vs = PWT.db.voidShieldDeck
+    if isReload and vs.savedCardsRemaining ~= nil then
+        self:RestoreState()
+        self:UpdateWidget()
+    end
+    -- Fresh logins and reloads without saved state are handled by OnLogin below.
+end
+
 function VSD:OnLogin()
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    -- If RestoreState already ran this session (reload path), skip the reset.
+    if PWT.db.voidShieldDeck.savedCardsRemaining == nil
+       and self.cardsRemaining ~= MAX_CARDS then
+        -- State was already restored by OnEnteringWorld; just find the slot and show.
+        pwsSlot = FindPWSSlot()
+        if PWT.db.voidShieldDeck.enabled and PWT.isDisc then
+            self:ShowWidget()
+        end
+        return
+    end
     self:ResetDeck("login")
     pwsSlot = FindPWSSlot()
-    if PWT.db and PWT.db.voidShieldDeck and PWT.db.voidShieldDeck.enabled and PWT.isDisc then
+    if PWT.db.voidShieldDeck.enabled and PWT.isDisc then
         self:ShowWidget()
     end
 end

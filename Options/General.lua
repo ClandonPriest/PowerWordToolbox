@@ -174,10 +174,12 @@ debugModulesLabel:SetText("Active modules:")
 debugModulesLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
 local MODULE_CHECKS = {
-    { key = "pi",        label = "Power Infusion" },
-    { key = "atonement", label = "Atonement"      },
-    { key = "radiance",  label = "Radiance"       },
-    { key = "ui",        label = "UI / Core"       },
+    { key = "pi",         label = "Power Infusion"    },
+    { key = "atonement",  label = "Atonement"         },
+    { key = "radiance",   label = "Radiance"          },
+    { key = "voidshield", label = "Void Shield"       },
+    { key = "utility",    label = "Utility Reminders" },
+    { key = "ui",         label = "UI / Core"         },
 }
 
 local moduleCheckFrames = {}
