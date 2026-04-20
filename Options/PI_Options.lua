@@ -8,8 +8,10 @@ local _, PWT = ...
 local UI  = PWT.UI
 local PI  = PWT.PI
 local C   = UI.C
-local PAD    = UI.PAD
-local FRAME_W = UI.FRAME_W
+local PAD      = UI.PAD
+local FRAME_W  = UI.FRAME_W
+local TAB_BAR_W = UI.TAB_BAR_W
+local CONTENT_W = FRAME_W - TAB_BAR_W  -- actual panel width (excludes sidebar)
 
 -- NOTE: This file references PWT.PI (Modules/PI.lua) and PWT.RaidFrames
 -- for all combat logic. This file is purely UI.
@@ -80,7 +82,7 @@ seqIndexLabel:Hide()
 -- 5) Mode description (dynamic)
 local modeDescLabel = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
 modeDescLabel:SetPoint("TOPLEFT", modeLabel, "BOTTOMLEFT", 0, -6)
-modeDescLabel:SetWidth(FRAME_W - PAD * 2 - 20)
+modeDescLabel:SetWidth(CONTENT_W - PAD * 2 - 20)
 modeDescLabel:SetJustifyH("LEFT")
 modeDescLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
@@ -166,7 +168,7 @@ stickLastCheck:Hide()
 
 stickLastDesc = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
 stickLastDesc:SetPoint("TOPLEFT", stickLastCheck, "BOTTOMLEFT", 26, -2)
-stickLastDesc:SetWidth(FRAME_W - PAD * 2 - 30)
+stickLastDesc:SetWidth(CONTENT_W - PAD * 2 - 30)
 stickLastDesc:SetJustifyH("LEFT")
 stickLastDesc:SetText("When off, the sequence loops back to position 1 after the last entry.")
 stickLastDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
@@ -182,7 +184,7 @@ piScroll:SetPoint("TOPLEFT",     piEnableLine, "BOTTOMLEFT",  0, -4)
 piScroll:SetPoint("BOTTOMRIGHT", piPanel,      "BOTTOMRIGHT", -PAD - 16, PAD)
 
 local piScrollChild = CreateFrame("Frame", nil, piScroll)
-piScrollChild:SetWidth(FRAME_W - PAD * 2 - 20)
+piScrollChild:SetWidth(CONTENT_W - PAD * 2 - 20)
 piScrollChild:SetHeight(1) -- will grow with content
 piScroll:SetScrollChild(piScrollChild)
 
@@ -194,7 +196,7 @@ listScroll:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT", -16, 0)
 listScroll:SetHeight(180)
 
 local listFrame = CreateFrame("Frame", nil, listScroll)
-listFrame:SetWidth(FRAME_W - PAD * 2 - 36)
+listFrame:SetWidth(CONTENT_W - PAD * 2 - 36)
 listFrame:SetHeight(1)  -- grows with content
 listScroll:SetScrollChild(listFrame)
 UI:MakeBg(listFrame, {0, 0, 0, 0.25})
@@ -219,7 +221,7 @@ RefreshList = function()
         if not row then
             row = CreateFrame("Button", nil, listFrame)
             row:SetHeight(30)
-            row:SetWidth(FRAME_W - PAD * 2 - 36)
+            row:SetWidth(CONTENT_W - PAD * 2 - 36)
 
             local bg = row:CreateTexture(nil, "BACKGROUND")
             bg:SetAllPoints(row)
@@ -288,7 +290,7 @@ RefreshList = function()
 
         row:ClearAllPoints()
         row:SetPoint("TOPLEFT", listFrame, "TOPLEFT", 0, -((i - 1) * 30))
-        row:SetWidth(FRAME_W - PAD * 2 - 36)
+        row:SetWidth(CONTENT_W - PAD * 2 - 36)
         row.index = i
         row.badge:SetText(tostring(i))
         -- In sequence mode, highlight the current target position
@@ -937,7 +939,7 @@ end)
 
 local overlayEnableDesc = overlayContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
 overlayEnableDesc:SetPoint("TOPLEFT", overlayEnableCheck, "BOTTOMLEFT", 26, -2)
-overlayEnableDesc:SetWidth(FRAME_W - PAD * 2 - 30)
+overlayEnableDesc:SetWidth(CONTENT_W - PAD * 2 - 30)
 overlayEnableDesc:SetJustifyH("LEFT")
 overlayEnableDesc:SetText("Displays a floating frame with the PI target's name and spell icon.")
 overlayEnableDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])

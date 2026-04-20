@@ -15,7 +15,7 @@ PWT.defaults = {
     piSequenceStickLast = false,
     piList              = {},
     piSequenceList      = {},
-    debug            = true,
+    debug            = false,
     debugModules     = { pi = true, atonement = true, radiance = true, ui = true, voidshield = true, utility = true },
     showChatMessages = true,
     showLoginMessage = true,
@@ -341,7 +341,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         PWT:Debug("Specialization changed, re-checking class/spec.")
         PWT:CheckSpec()
-        if PWT.isDisc and PWT.Atonement then PWT.Atonement:OnLogin() end
+        if PWT.isDisc and PWT.Atonement and PWT.db and PWT.db.atonement and PWT.db.atonement.enabled then
+            PWT.Atonement:OnLogin()
+        end
         if PWT.isDisc and PWT.Radiance  then PWT.Radiance:OnLogin()  end
         if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnLogin() end
 
@@ -366,11 +368,13 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "UNIT_AURA" then
         if not PWT.isDisc then return end
+        if not (PWT.db and PWT.db.atonement and PWT.db.atonement.enabled) then return end
         local unit = ...
         if PWT.Atonement then PWT.Atonement:ScanUnit(unit) end
 
     elseif event == "GROUP_ROSTER_UPDATE" then
-        if PWT.isDisc and PWT.Atonement then
+        if PWT.isDisc and PWT.Atonement
+           and PWT.db and PWT.db.atonement and PWT.db.atonement.enabled then
             PWT:Debug("Group roster changed, rescanning Atonement.")
             PWT.Atonement:ScanAll()
         end
@@ -390,7 +394,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if PWT.isDisc and PWT.VoidShieldDeck then
             PWT.VoidShieldDeck:OnEnteringWorld(isReload)
         end
-        if PWT.isDisc and PWT.Atonement then
+        if PWT.isDisc and PWT.Atonement
+           and PWT.db and PWT.db.atonement and PWT.db.atonement.enabled then
             PWT:Debug("Entering world, rescanning Atonement.")
             PWT.Atonement:ScanAll()
         end
@@ -427,7 +432,7 @@ SlashCmdList["PWTB"] = function(msg)
         local specID    = specIndex > 0 and GetSpecializationInfo(specIndex) or 0
         local LSM       = LibStub and LibStub("LibSharedMedia-3.0", true)
         PWT:Print("=== Power Word: Toolbox Status ===")
-        PWT:Print("Version: |cffcc99ffv1.0.0|r")
+        PWT:Print("Version: |cffcc99ffv" .. (C_AddOns.GetAddOnMetadata("PowerWordToolbox", "Version") or "?") .. "|r")
         PWT:Print("Class: " .. tostring(class) ..
             "  isPriest=" .. tostring(PWT.isPriest) ..
             "  isDisc="   .. tostring(PWT.isDisc) ..

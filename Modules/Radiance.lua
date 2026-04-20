@@ -18,6 +18,7 @@ local BRIGHT_PUPIL_SPELL_ID  = 390669
 local RADIANCE_CD_BASE       = 18   -- seconds, no Bright Pupil
 local RADIANCE_CD_BRIGHT     = 15   -- seconds, with Bright Pupil
 local RADIANCE_MAX_CHARGES   = 2
+local RADIANCE_TICK          = 0.05 -- 20fps update rate during recharge
 
 -- ============================================================
 --  State
@@ -28,6 +29,13 @@ local rechargeStart = 0          -- GetTime() when the current recharge chain be
 local brightPupil      = false   -- auto-detected from talent API
 local detectedTalent   = nil     -- "Bright Pupil", "Enduring Luminescence", or nil
 local widget        = nil
+
+-- OnUpdate performance state
+local radElapsed      = 0      -- tick accumulator for recharge throttle
+local lastChargeState = -1     -- detects full-charge transition to flush bars once
+local lastTimerStr    = ""     -- dirty check: only call SetText when display value changes
+local lastLWidth      = -1     -- dirty check: last rendered left fill width in px
+local lastRWidth      = -1     -- dirty check: last rendered right fill width in px
 
 -- ============================================================
 --  Helpers
@@ -92,11 +100,11 @@ function Radiance:GetDetectedTalent()
 end
 
 -- Advance the charge state based on elapsed time.
--- Called every OnUpdate so charge restoration is never missed.
-local function TickCharges()
+-- Accepts the current timestamp to avoid a redundant GetTime() call per frame.
+local function TickCharges(now)
     if charges >= RADIANCE_MAX_CHARGES then return end
     local duration = GetDuration()
-    local elapsed  = GetTime() - rechargeStart
+    local elapsed  = now - rechargeStart
     if elapsed >= duration then
         charges = charges + 1
         PWT:Debug("Radiance charge restored. Charges: " .. charges, "radiance")
@@ -110,11 +118,13 @@ end
 -- Returns leftFill (0-1), rightFill (0-1), timeRemaining (seconds).
 -- Left bar  = charge 1 (first to come back when both are spent).
 -- Right bar = charge 2 (second to come back, or recharging when only 1 is spent).
-local function GetBarFills()
-    TickCharges()
+-- Accepts the current timestamp so GetTime() is called once per tick, not three times.
+local function GetBarFills(now)
+    TickCharges(now)
     local duration = GetDuration()
-    local progress = math.min((GetTime() - rechargeStart) / duration, 1)
-    local timeLeft = math.max(0, duration - (GetTime() - rechargeStart))
+    local elapsed  = now - rechargeStart
+    local progress = math.min(elapsed / duration, 1)
+    local timeLeft = math.max(0, duration - elapsed)
 
     if charges >= 2 then
         return 1, 1, 0
@@ -311,23 +321,58 @@ function Radiance:CreateWidget()
 
     -- ── OnUpdate ──────────────────────────────────────────
     local timerAnchorCharges = -1  -- sentinel: force first anchor
-    f:SetScript("OnUpdate", function(self)
-        if not (PWT.db and PWT.db.radiance) then return end
+    f:SetScript("OnUpdate", function(self, delta)
+        if not (PWT.db and PWT.db.radiance and PWT.db.radiance.enabled) then return end
 
-        local lPct, rPct, timeLeft = GetBarFills()
+        -- Full skip when both charges are full — the dominant idle state.
+        -- On the one transition frame where charges just became full, flush bars
+        -- to 100% and hide the timer, then do nothing until a charge is spent.
+        if charges >= RADIANCE_MAX_CHARGES then
+            if lastChargeState ~= RADIANCE_MAX_CHARGES then
+                local lW = leftBar:GetWidth()
+                if lW and lW > 0 then leftFill:SetWidth(lW) end
+                local rW = rightBar:GetWidth()
+                if rW and rW > 0 then rightFill:SetWidth(rW) end
+                timerText:Hide()
+                lastChargeState = RADIANCE_MAX_CHARGES
+                lastLWidth = lW or -1
+                lastRWidth = lW or -1
+                lastTimerStr = ""
+            end
+            return
+        end
 
+        -- Throttle bar updates to RADIANCE_TICK (20fps) while recharging.
+        radElapsed = radElapsed + delta
+        if radElapsed < RADIANCE_TICK then return end
+        radElapsed = 0
+        lastChargeState = charges
+
+        -- Single GetTime() call — passed into both TickCharges and GetBarFills.
+        local now = GetTime()
+        local lPct, rPct, timeLeft = GetBarFills(now)
+
+        -- Only call SetWidth when the rendered pixel width has meaningfully changed.
         local lW = leftBar:GetWidth()
         if lW and lW > 0 then
-            leftFill:SetWidth(math.max(0.01, lW * lPct))
+            local newLW = math.max(0.01, lW * lPct)
+            if math.abs(newLW - lastLWidth) > 0.5 then
+                leftFill:SetWidth(newLW)
+                lastLWidth = newLW
+            end
         end
 
         local rW = rightBar:GetWidth()
         if rW and rW > 0 then
-            rightFill:SetWidth(math.max(0.01, rW * rPct))
+            local newRW = math.max(0.01, rW * rPct)
+            if math.abs(newRW - lastRWidth) > 0.5 then
+                rightFill:SetWidth(newRW)
+                lastRWidth = newRW
+            end
         end
 
         if PWT.db.radiance.showTimer and timeLeft > 0.05 then
-            -- Reanchor only when the recharging charge changes.
+            -- Reanchor only when the recharging charge slot changes.
             if charges ~= timerAnchorCharges then
                 timerText:ClearAllPoints()
                 if charges == 0 then
@@ -339,10 +384,16 @@ function Radiance:CreateWidget()
                 end
                 timerAnchorCharges = charges
             end
-            timerText:SetText(string.format("%.1f", timeLeft))
+            -- Only call SetText when the formatted string actually changes.
+            local timerStr = string.format("%.1f", timeLeft)
+            if timerStr ~= lastTimerStr then
+                timerText:SetText(timerStr)
+                lastTimerStr = timerStr
+            end
             timerText:Show()
         else
             timerText:Hide()
+            lastTimerStr = ""
         end
     end)
 
@@ -357,6 +408,11 @@ function Radiance:RecreateWidget()
         widget:Hide()
         widget = nil
     end
+    radElapsed      = 0
+    lastChargeState = -1
+    lastTimerStr    = ""
+    lastLWidth      = -1
+    lastRWidth      = -1
     self:CreateWidget()
     if PWT.db and PWT.db.radiance and PWT.db.radiance.enabled and PWT.isDisc then
         self:ShowWidget()

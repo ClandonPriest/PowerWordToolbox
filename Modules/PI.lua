@@ -48,8 +48,10 @@ PI.soundList      = soundList  -- shared reference for Options
 
 function PI:BuildSoundList()
     wipe(soundList)
+    local seen = {}
     for _, s in ipairs(PI_SOUNDS) do
         soundList[#soundList + 1] = { label = s.label, sType = "preset", id = s.id }
+        seen[s.label] = true
     end
     local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
     if LSM then
@@ -58,12 +60,9 @@ function PI:BuildSoundList()
             table.sort(lsmSounds)
             for _, name in ipairs(lsmSounds) do
                 local path = LSM:Fetch("sound", name)
-                local dupe = false
-                for _, existing in ipairs(soundList) do
-                    if existing.label == name then dupe = true; break end
-                end
-                if not dupe and path then
+                if not seen[name] and path then
                     soundList[#soundList + 1] = { label = name, sType = "lsm", path = path }
+                    seen[name] = true
                 end
             end
         end
@@ -71,7 +70,6 @@ function PI:BuildSoundList()
 end
 
 function PI:PlayCurrentSound()
-    self:BuildSoundList()
     local idx   = PWT.db.pi.soundIndex or 5
     local entry = soundList[idx]
     local vol   = PWT.db.pi.soundVolume or 1.0
@@ -110,7 +108,6 @@ function PI:ApplyGlow(frame, playerName)
 
     -- Sound
     if cfg.soundEnabled ~= false then
-        self:BuildSoundList()
         local idx     = cfg.soundIndex or 5
         local entry   = soundList[idx]
         local vol     = cfg.soundVolume or 1.0

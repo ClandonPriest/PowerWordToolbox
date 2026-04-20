@@ -69,7 +69,10 @@ modAtCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
 modAtCheck:SetScript("OnClick", function(self)
     PWT.db.atonement.enabled = self:GetChecked()
     if self:GetChecked() then
-        if PWT.Atonement then PWT.Atonement:UpdateWidget() end
+        if PWT.Atonement then
+            PWT.Atonement:UpdateWidget()
+            PWT.Atonement:ScanAll()
+        end
     else
         if PWT.Atonement then PWT.Atonement:HideWidget() end
     end
@@ -225,7 +228,7 @@ local chanHeaderDesc = genContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmal
 chanHeaderDesc:SetPoint("TOPLEFT", chanHeader, "BOTTOMLEFT", 0, -4)
 chanHeaderDesc:SetWidth(UI.FRAME_W - PAD * 2)
 chanHeaderDesc:SetJustifyH("LEFT")
-chanHeaderDesc:SetText("The in-game sound channel all addon audio alerts are played through.")
+chanHeaderDesc:SetText("The in-game sound channel all addon audio alerts are played through. Applies to Power Infusion and Void Shield proc sounds.")
 chanHeaderDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
 local chanDropBtn = CreateFrame("Button", nil, genContent, "UIPanelButtonTemplate")
@@ -333,8 +336,9 @@ local function PopulateChanDropdown()
                 active and C.tabActive[4] or 0)
         end)
         row:SetScript("OnClick", function()
-            if PWT.db and PWT.db.pi then
-                PWT.db.pi.soundChannel = entry.value
+            if PWT.db then
+                if PWT.db.pi then PWT.db.pi.soundChannel = entry.value end
+                if PWT.db.voidShieldDeck then PWT.db.voidShieldDeck.procSoundChannel = entry.value end
             end
             chanDropBtn:GetFontString():SetText(entry.label)
             HideChanDropdown()

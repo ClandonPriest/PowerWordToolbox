@@ -15,12 +15,24 @@ local AT = PWT.Atonement
 local ATONEMENT_ID = 194384
 local AT_TICK      = 0.1
 
+-- Precomputed opposite-corner map used by mouseFollow each frame.
+-- Defined once at module level to avoid a table allocation per frame.
+local OPPOSITE = {
+    TOPLEFT     = "BOTTOMRIGHT",
+    TOPRIGHT    = "BOTTOMLEFT",
+    BOTTOMLEFT  = "TOPRIGHT",
+    BOTTOMRIGHT = "TOPLEFT",
+}
+
 -- ============================================================
 --  State
 -- ============================================================
 
 local atTable   = {}  -- [unitGUID] = expirationTime
 local atElapsed = 0
+
+-- Reusable buffer for expired GUIDs — avoids a per-tick allocation inside GetCountAndLowest.
+local expired = {}
 
 -- ============================================================
 --  Scanning
@@ -38,76 +50,28 @@ local function GetGroupUnits()
     return units
 end
 
-function AT:ScanUnit(unit)
-    if not UnitExists(unit) then return end
-    -- Only scan group-relevant units — ignore nameplates, focus, target, etc.
-    if not (unit == "player" or unit:match("^party%d") or unit:match("^raid%d")) then return end
-    local guid = UnitGUID(unit)
-    if not guid or issecretvalue(guid) then
-        PWT:Debug("AT:ScanUnit: no readable GUID for unit " .. tostring(unit) .. " — skipping.", "atonement")
-        return
-    end
-
-    local i = 1
-    while true do
-        local aura = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
-        if not aura then break end
-        local spellIdSecret  = issecretvalue(aura.spellId)
-        local nameSecret     = issecretvalue(aura.name)
-        local expirySecret   = issecretvalue(aura.expirationTime)
-        local sourceSecret   = issecretvalue(aura.sourceUnit)
-
-        if not spellIdSecret and aura.spellId == ATONEMENT_ID then
-            if sourceSecret then
-                PWT:Debug("AT:ScanUnit: Atonement spellId matched on " .. unit .. " but sourceUnit is secret.", "atonement")
-            elseif not (aura.sourceUnit and UnitIsUnit(aura.sourceUnit, "player")) then
-                PWT:Debug("AT:ScanUnit: Atonement on " .. unit .. " is from another caster, ignoring.", "atonement")
-            elseif expirySecret then
-                PWT:Debug("AT:ScanUnit: Atonement on " .. unit .. " matched but expirationTime is secret.", "atonement")
-            else
-                PWT:Debug("AT:ScanUnit: Atonement (spellId) registered on " .. unit, "atonement")
-                atTable[guid] = aura.expirationTime
-                return
-            end
-        elseif not nameSecret and aura.name == "Atonement" then
-            if sourceSecret then
-                PWT:Debug("AT:ScanUnit: Atonement name matched on " .. unit .. " but sourceUnit is secret.", "atonement")
-            elseif not (aura.sourceUnit and UnitIsUnit(aura.sourceUnit, "player")) then
-                PWT:Debug("AT:ScanUnit: Atonement (name fallback) on " .. unit .. " is from another caster.", "atonement")
-            elseif expirySecret then
-                PWT:Debug("AT:ScanUnit: Atonement (name fallback) on " .. unit .. " but expirationTime is secret.", "atonement")
-            else
-                PWT:Debug("AT:ScanUnit: Atonement (name fallback) registered on " .. unit, "atonement")
-                atTable[guid] = aura.expirationTime
-                return
-            end
-        end
-        i = i + 1
-    end
-    -- Atonement not found — clear entry only if guid is usable as a key
-    if not issecretvalue(guid) then
-        atTable[guid] = nil
-    end
+-- String prefix check — avoids pattern compilation overhead on every UNIT_AURA call.
+local function IsGroupUnit(unit)
+    if unit == "player" then return true end
+    local prefix = string.sub(unit, 1, 4)
+    return prefix == "raid" or prefix == "part"
 end
 
-function AT:ScanAll()
-    wipe(atTable)
-    local units = GetGroupUnits()
-    PWT:Debug("AT:ScanAll: scanning " .. #units .. " units.", "atonement")
-    for _, unit in ipairs(units) do
-        self:ScanUnit(unit)
-    end
-    local count = 0
-    for _ in pairs(atTable) do count = count + 1 end
-    PWT:Debug("AT:ScanAll: found " .. count .. " active Atonement(s).", "atonement")
+-- Validates source/expiry fields and registers the aura if usable. Returns true on success.
+-- issecretvalue checks are deferred to here so they only run on an actual Atonement match.
+local function TryRegisterAura(guid, aura)
+    if issecretvalue(aura.sourceUnit) then return false end
+    if not (aura.sourceUnit and UnitIsUnit(aura.sourceUnit, "player")) then return false end
+    if issecretvalue(aura.expirationTime) then return false end
+    atTable[guid] = aura.expirationTime
+    return true
 end
 
-function AT:GetCount()
-    local count = 0
-    for _ in pairs(atTable) do count = count + 1 end
-    return count
-end
+-- ============================================================
+--  Count / Expiry
+-- ============================================================
 
+-- Defined before ScanAll/GetCount so both can reference it directly.
 local function GetCountAndLowest()
     local count  = 0
     local lowest = math.huge
@@ -119,12 +83,76 @@ local function GetCountAndLowest()
                 count = count + 1
                 if remaining < lowest then lowest = remaining end
             else
-                atTable[guid] = nil
+                -- Collect expired entries; removing during pairs iteration is unsafe.
+                expired[#expired + 1] = guid
             end
         end
     end
+    for i = 1, #expired do
+        atTable[expired[i]] = nil
+        expired[i] = nil
+    end
     if lowest == math.huge then lowest = 0 end
     return count, lowest
+end
+
+function AT:ScanUnit(unit)
+    if not UnitExists(unit) then return end
+    if not IsGroupUnit(unit) then return end
+    local guid = UnitGUID(unit)
+    if not guid or issecretvalue(guid) then
+        PWT:Debug("AT:ScanUnit: no readable GUID for " .. tostring(unit) .. " — skipping.", "atonement")
+        return
+    end
+
+    -- Fast path: O(1) direct spellID lookup — skips iterating the full aura list.
+    -- Guarded: GetAuraDataBySpellID is not available in all WoW versions.
+    if C_UnitAuras.GetAuraDataBySpellID then
+        local aura = C_UnitAuras.GetAuraDataBySpellID(unit, ATONEMENT_ID, "HELPFUL")
+        if aura and not issecretvalue(aura.spellId) then
+            if TryRegisterAura(guid, aura) then
+                PWT:Debug("AT:ScanUnit: Atonement registered on " .. unit, "atonement")
+            else
+                atTable[guid] = nil
+            end
+            return
+        end
+    end
+
+    -- Slow path: name-based scan — used when GetAuraDataBySpellID is unavailable,
+    -- or when the spellId field is secret.
+    -- issecretvalue is only checked after a name match, not on every aura.
+    local i = 1
+    while true do
+        local a = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
+        if not a then break end
+        if not issecretvalue(a.name) and a.name == "Atonement" then
+            if TryRegisterAura(guid, a) then
+                PWT:Debug("AT:ScanUnit: Atonement (name fallback) registered on " .. unit, "atonement")
+            else
+                atTable[guid] = nil
+            end
+            return
+        end
+        i = i + 1
+    end
+
+    atTable[guid] = nil
+end
+
+function AT:ScanAll()
+    wipe(atTable)
+    local units = GetGroupUnits()
+    PWT:Debug("AT:ScanAll: scanning " .. #units .. " units.", "atonement")
+    for _, unit in ipairs(units) do
+        self:ScanUnit(unit)
+    end
+    local count = GetCountAndLowest()
+    PWT:Debug("AT:ScanAll: found " .. count .. " active Atonement(s).", "atonement")
+end
+
+function AT:GetCount()
+    return (GetCountAndLowest())
 end
 
 -- ============================================================
@@ -146,10 +174,10 @@ widget:RegisterForDrag("LeftButton")
 widget:SetScript("OnDragStart", function(self) self:StartMoving() end)
 widget:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
-    local _, _, _, x, y = self:GetPoint()
     if PWT.db then
-        PWT.db.atonement.posX = x
-        PWT.db.atonement.posY = y
+        local x, y = self:GetCenter()
+        PWT.db.atonement.posX = x - UIParent:GetWidth()  / 2
+        PWT.db.atonement.posY = y - UIParent:GetHeight() / 2
     end
 end)
 widget:SetScript("OnEnter", function(self)
@@ -175,22 +203,20 @@ lowestNum:SetPoint("TOP", countNum, "BOTTOM", 0, -2)
 lowestNum:SetText("--")
 lowestNum:SetTextColor(1.0, 0.85, 0.4)
 
+-- Cached display state — SetText/SetTextColor/Show/Hide only called on actual change.
+local lastCount      = -1
+local lastLowestStr  = ""
+local lastColorBand  = -1   -- 0=muted, 1=red, 2=orange, 3=yellow
+local lastShowLowest = nil
+
 widget:SetScript("OnUpdate", function(self, delta)
-    -- Mouse cursor follow runs every frame for smooth tracking
-    if PWT.db and PWT.db.atonement.mouseFollow then
+    if not (PWT.db and PWT.db.atonement and PWT.db.atonement.enabled) then return end
+
+    -- Mouse cursor follow runs every frame for smooth tracking.
+    if PWT.db.atonement.mouseFollow then
         local cx, cy = GetCursorPosition()
         local scale  = UIParent:GetEffectiveScale()
         local anchor = PWT.db.atonement.mouseAnchor or "TOPLEFT"
-        -- The saved anchor describes where the widget appears relative to the
-        -- cursor (e.g. "TOPLEFT" = widget is above-left of cursor).  SetPoint's
-        -- first arg is the corner of the widget that sits AT the cursor, so we
-        -- need the geometrically opposite corner.
-        local OPPOSITE = {
-            TOPLEFT     = "BOTTOMRIGHT",
-            TOPRIGHT    = "BOTTOMLEFT",
-            BOTTOMLEFT  = "TOPRIGHT",
-            BOTTOMRIGHT = "TOPLEFT",
-        }
         self:ClearAllPoints()
         self:SetPoint(OPPOSITE[anchor] or "BOTTOMRIGHT", UIParent, "BOTTOMLEFT", cx / scale, cy / scale)
     end
@@ -198,26 +224,49 @@ widget:SetScript("OnUpdate", function(self, delta)
     atElapsed = atElapsed + delta
     if atElapsed < AT_TICK then return end
     atElapsed = 0
-    if not PWT.db or not PWT.db.atonement.enabled then return end
+
     local count, lowest = GetCountAndLowest()
-    countNum:SetText(tostring(count))
-    if PWT.db.atonement.showLowest then
-        lowestNum:Show()
+
+    if count ~= lastCount then
+        countNum:SetText(tostring(count))
+        lastCount = count
+    end
+
+    -- showLowest is a config value; only apply show/hide when it actually changes.
+    local showLowest = PWT.db.atonement.showLowest
+    if showLowest ~= lastShowLowest then
+        lowestNum:SetShown(showLowest)
+        lastShowLowest = showLowest
+    end
+
+    if showLowest then
         if count > 0 and lowest > 0 then
-            if lowest <= 3 then
-                lowestNum:SetTextColor(1.0, 0.3, 0.3)
-            elseif lowest <= 6 then
-                lowestNum:SetTextColor(1.0, 0.75, 0.2)
-            else
-                lowestNum:SetTextColor(1.0, 0.85, 0.4)
+            local band = lowest <= 3 and 1 or (lowest <= 6 and 2 or 3)
+            if band ~= lastColorBand then
+                if band == 1 then
+                    lowestNum:SetTextColor(1.0, 0.3, 0.3)
+                elseif band == 2 then
+                    lowestNum:SetTextColor(1.0, 0.75, 0.2)
+                else
+                    lowestNum:SetTextColor(1.0, 0.85, 0.4)
+                end
+                lastColorBand = band
             end
-            lowestNum:SetText(string.format("%.1f", lowest))
+            local lowestStr = string.format("%.1f", lowest)
+            if lowestStr ~= lastLowestStr then
+                lowestNum:SetText(lowestStr)
+                lastLowestStr = lowestStr
+            end
         else
-            lowestNum:SetTextColor(0.5, 0.5, 0.55)
-            lowestNum:SetText("--")
+            if lastColorBand ~= 0 then
+                lowestNum:SetTextColor(0.5, 0.5, 0.55)
+                lastColorBand = 0
+            end
+            if lastLowestStr ~= "--" then
+                lowestNum:SetText("--")
+                lastLowestStr = "--"
+            end
         end
-    else
-        lowestNum:Hide()
     end
 end)
 
@@ -263,6 +312,11 @@ function AT:UpdateWidget()
     widget:SetSize(w, h)
 
     lowestNum:SetShown(cfg.showLowest)
+    -- Reset display cache so OnUpdate re-applies state on next tick.
+    lastCount      = -1
+    lastLowestStr  = ""
+    lastColorBand  = -1
+    lastShowLowest = nil
 
     if not cfg.enabled then
         widget:Hide()

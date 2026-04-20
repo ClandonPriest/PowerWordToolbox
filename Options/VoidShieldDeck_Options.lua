@@ -21,9 +21,13 @@ vsScroll:SetScript("OnMouseWheel", function(self, delta)
     self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * 20)))
 end)
 
+-- VS_CONTENT_H: total pixel height of all static content in this tab.
+-- Update this value if sections are added or removed.
+local VS_CONTENT_H = 1400
+
 local vsContent = CreateFrame("Frame", nil, vsScroll)
 vsContent:SetWidth(FRAME_W)
-vsContent:SetHeight(1400)
+vsContent:SetHeight(VS_CONTENT_H)
 vsScroll:SetScrollChild(vsContent)
 
 -- ── Title ──────────────────────────────────────────────────────

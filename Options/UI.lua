@@ -390,7 +390,7 @@ UI.footer = footer
 
 local footerVersion = footer:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
 footerVersion:SetPoint("RIGHT", footer, "RIGHT", -PAD, 0)
-footerVersion:SetText("v1.0.0")
+footerVersion:SetText("v" .. (C_AddOns.GetAddOnMetadata("PowerWordToolbox", "Version") or "?"))
 footerVersion:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
 -- ============================================================
