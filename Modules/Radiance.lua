@@ -1,17 +1,11 @@
--- ============================================================
---  Power Word: Toolbox  |  Modules/Radiance.lua
---  Power Word: Radiance charge tracker.
---  Two side-by-side fill bars driven by cast-event timing.
--- ============================================================
+-- Power Word: Toolbox | Modules/Radiance.lua
 
 local _, PWT = ...
 
 PWT.Radiance = {}
 local Radiance = PWT.Radiance
 
--- ============================================================
---  Constants
--- ============================================================
+-- Constants
 
 local RADIANCE_SPELL_ID      = 194509
 local BRIGHT_PUPIL_SPELL_ID  = 390669
@@ -20,9 +14,7 @@ local RADIANCE_CD_BRIGHT     = 15   -- seconds, with Bright Pupil
 local RADIANCE_MAX_CHARGES   = 2
 local RADIANCE_TICK          = 0.05 -- 20fps update rate during recharge
 
--- ============================================================
---  State
--- ============================================================
+-- State
 
 local charges       = RADIANCE_MAX_CHARGES
 local rechargeStart = 0          -- GetTime() when the current recharge chain began
@@ -37,18 +29,14 @@ local lastTimerStr    = ""     -- dirty check: only call SetText when display va
 local lastLWidth      = -1     -- dirty check: last rendered left fill width in px
 local lastRWidth      = -1     -- dirty check: last rendered right fill width in px
 
--- ============================================================
---  Helpers
--- ============================================================
+-- Helpers
 
 local function GetDuration()
     return brightPupil and RADIANCE_CD_BRIGHT or RADIANCE_CD_BASE
 end
 
--- Walks the active talent config tree looking for a purchased node whose
--- spell name is "Bright Pupil".  Each node body is wrapped in pcall so a
--- secret/tainted value on any individual node doesn't abort the whole scan.
 -- Returns the spell name of the purchased talent at the given node, or nil.
+-- pcall guards each node against tainted/secret values aborting the scan.
 local function GetNodeTalentName(configID, nodeID)
     local nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
     if not nodeInfo or not nodeInfo.ranksPurchased
@@ -64,7 +52,6 @@ local function GetNodeTalentName(configID, nodeID)
     return C_Spell.GetSpellName(defInfo.spellID)
 end
 
--- Returns the name of the active Radiance CD talent, or nil if neither is taken. 
 local function ScanForRadianceTalent()
     if not (C_ClassTalents and C_Traits and C_Spell) then return nil end
     local configID = C_ClassTalents.GetActiveConfigID()
@@ -137,27 +124,15 @@ local function GetBarFills(now)
     end
 end
 
--- ============================================================
---  Charge Tracking
--- ============================================================
+-- Charge Tracking
 
--- ============================================================
---  DEBUG: spell cast logging
---  Set Radiance.debugCasts = true in-game to enable.
---  /run PWT.Radiance.debugCasts = true
---  /run PWT.Radiance.debugCasts = false
--- ============================================================
 Radiance.debugCasts = false
 
 local EVANGELISM_SPELL_ID = 472433
 
--- GetTime() of the most recently queued Radiance charge consumption.
--- Set to nil by Evangelism when it fires in the same frame to suppress it.
+-- Set to nil by Evangelism in the same frame to suppress pending consumption.
 local pendingRadianceTime = nil
 
--- Combat log debug frame — only active when debugCasts is true.
--- Captures SPELL_CAST_SUCCESS for the player so we can see every
--- spell (including Evangelism and proc Radiances) with their source.
 local debugCLEUFrame = CreateFrame("Frame")
 debugCLEUFrame:SetScript("OnEvent", function()
     if not PWT.Radiance.debugCasts then return end
@@ -186,7 +161,6 @@ end
 function Radiance:OnSpellCast(unit, spellID)
     if unit ~= "player" then return end
 
-    -- ── DEBUG: log every UNIT_SPELLCAST_SUCCEEDED for the player ──
     if self.debugCasts then
         local spellName = C_Spell.GetSpellName(spellID) or "unknown"
         PWT:Debug(string.format(
@@ -226,9 +200,7 @@ function Radiance:OnSpellCast(unit, spellID)
     end
 end
 
--- ============================================================
---  Widget
--- ============================================================
+-- Widget
 
 function Radiance:CreateWidget()
     if widget then return end
@@ -251,7 +223,6 @@ function Radiance:CreateWidget()
         PWT.db.radiance.posY = y - UIParent:GetHeight() / 2
     end)
 
-    -- Saved position
     f:ClearAllPoints()
     if db.posX and db.posY then
         f:SetPoint("CENTER", UIParent, "CENTER", db.posX, db.posY)
@@ -462,9 +433,7 @@ function Radiance:ResetPosition()
     PWT.db.radiance.posY = nil
 end
 
--- ============================================================
---  Event Handlers
--- ============================================================
+-- Event Handlers
 
 function Radiance:OnLogin()
     self:DetectBrightPupil()

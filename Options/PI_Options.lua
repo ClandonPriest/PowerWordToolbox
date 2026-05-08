@@ -1,76 +1,52 @@
--- ============================================================
---  Power Word: Toolbox  |  Options/PI_Options.lua
---  Power Infusion options tab: mode toggle, priority/sequence
---  list, alert settings (glow, sound).
--- ============================================================
+-- Power Word: Toolbox | Options/PI_Options.lua
 
 local _, PWT = ...
 local UI  = PWT.UI
-local PI  = PWT.PI
 local C   = UI.C
-local PAD      = UI.PAD
-local FRAME_W  = UI.FRAME_W
-local TAB_BAR_W = UI.TAB_BAR_W
-local CONTENT_W = FRAME_W - TAB_BAR_W  -- actual panel width (excludes sidebar)
-
--- NOTE: This file references PWT.PI (Modules/PI.lua) and PWT.RaidFrames
--- for all combat logic. This file is purely UI.
+local PAD = UI.PAD
+local CONTENT_W = UI.CONTENT_W
 
 local piPanel = UI:AddTab("pi", "Power Infusion", 2)
 
--- 1) Title
-local piTitle = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontLarge")
-piTitle:SetPoint("TOPLEFT", piPanel, "TOPLEFT", PAD, -PAD)
-piTitle:SetText("Power Infusion")
-piTitle:SetTextColor(C.text[1], C.text[2], C.text[3])
-
--- 2) Agnostic description
-local piSub = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-piSub:SetPoint("TOPLEFT", piTitle, "BOTTOMLEFT", 0, -4)
-piSub:SetText("Configure how Power Infusion targets are selected and alerted during combat.")
-piSub:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
-
-local piTopLine = UI:MakeLine(piPanel, C.border, 1)
-piTopLine:SetPoint("TOPLEFT",  piSub, "BOTTOMLEFT",  0, -8)
-piTopLine:SetPoint("TOPRIGHT", piPanel, "TOPRIGHT",  -PAD, -8)
-
 local RefreshList  -- forward declaration, defined after row pool is built
 
--- 3) Mode selector
+-- Mode selector
 local modeLabel = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-modeLabel:SetPoint("TOPLEFT", piTopLine, "BOTTOMLEFT", 4, -10)
+modeLabel:SetPoint("TOPLEFT", piPanel, "TOPLEFT", 0, -PAD)
 modeLabel:SetText("Mode:")
 modeLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
-local modePriorityBtn = CreateFrame("Button", "PWT_ModePriorityBtn", UI.optionsFrame)
-UI.modePriorityBtn = modePriorityBtn
-modePriorityBtn:SetSize(100, 22)
-modePriorityBtn:SetPoint("LEFT", modeLabel, "RIGHT", 8, 0)
-modePriorityBtn:SetFrameStrata("DIALOG")
-modePriorityBtn:SetFrameLevel(100)
-local modePriorityBg = modePriorityBtn:CreateTexture(nil, "BACKGROUND")
-modePriorityBg:SetAllPoints(modePriorityBtn)
-modePriorityBg:SetColorTexture(0.1, 0.1, 0.12, 0.8)
-local modePriorityLbl = modePriorityBtn:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-modePriorityLbl:SetAllPoints(modePriorityBtn)
-modePriorityLbl:SetJustifyH("CENTER")
-modePriorityLbl:SetText("Priority List")
-modePriorityLbl:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+-- Helper: build a border+fill mode button (same visual language as UI:MakeButton)
+local function MakeModeButton(name, label, anchorLeft, anchorOffset)
+    local btn = CreateFrame("Button", name, UI.optionsFrame)
+    btn:SetSize(110, 26)
+    btn:SetPoint("LEFT", anchorLeft, "RIGHT", anchorOffset, 0)
+    btn:SetFrameStrata("DIALOG")
+    btn:SetFrameLevel(100)
 
-local modeSequenceBtn = CreateFrame("Button", "PWT_ModeSequenceBtn", UI.optionsFrame)
+    btn.bg = btn:CreateTexture(nil, "BACKGROUND")
+    btn.bg:SetAllPoints(btn)
+    btn.bg:SetColorTexture(C.accentSecondary[1], C.accentSecondary[2], C.accentSecondary[3], 0.30)
+
+    btn.fill = btn:CreateTexture(nil, "ARTWORK")
+    btn.fill:SetPoint("TOPLEFT",     btn, "TOPLEFT",     1, -1)
+    btn.fill:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", -1,  1)
+    btn.fill:SetColorTexture(0.13, 0.10, 0.17, 0.75)
+
+    btn.lbl = btn:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
+    btn.lbl:SetAllPoints(btn)
+    btn.lbl:SetJustifyH("CENTER")
+    btn.lbl:SetText(label)
+    btn.lbl:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+
+    return btn
+end
+
+local modePriorityBtn = MakeModeButton("PWT_ModePriorityBtn", "Priority List", modeLabel, 8)
+UI.modePriorityBtn = modePriorityBtn
+
+local modeSequenceBtn = MakeModeButton("PWT_ModeSequenceBtn", "PI Sequence", modePriorityBtn, 6)
 UI.modeSequenceBtn = modeSequenceBtn
-modeSequenceBtn:SetSize(100, 22)
-modeSequenceBtn:SetPoint("LEFT", modePriorityBtn, "RIGHT", 6, 0)
-modeSequenceBtn:SetFrameStrata("DIALOG")
-modeSequenceBtn:SetFrameLevel(100)
-local modeSequenceBg = modeSequenceBtn:CreateTexture(nil, "BACKGROUND")
-modeSequenceBg:SetAllPoints(modeSequenceBtn)
-modeSequenceBg:SetColorTexture(0.1, 0.1, 0.12, 0.8)
-local modeSequenceLbl = modeSequenceBtn:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-modeSequenceLbl:SetAllPoints(modeSequenceBtn)
-modeSequenceLbl:SetJustifyH("CENTER")
-modeSequenceLbl:SetText("PI Sequence")
-modeSequenceLbl:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
 -- Sequence position indicator
 local seqIndexLabel = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
@@ -79,15 +55,14 @@ seqIndexLabel:SetPoint("LEFT", modeSequenceBtn, "RIGHT", 10, 0)
 seqIndexLabel:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
 seqIndexLabel:Hide()
 
--- 5) Mode description (dynamic)
+-- Mode description (dynamic)
 local modeDescLabel = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-modeDescLabel:SetPoint("TOPLEFT", modeLabel, "BOTTOMLEFT", 0, -6)
+modeDescLabel:SetPoint("TOPLEFT", modeLabel, "BOTTOMLEFT", 0, -20)
 modeDescLabel:SetWidth(CONTENT_W - PAD * 2 - 20)
 modeDescLabel:SetJustifyH("LEFT")
 modeDescLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
--- Forward-declared so UpdateModeButtons (defined below) can reference them.
--- Assigned after piEnableLine is created.
+-- Forward-declared so UpdateModeButtons can reference them before they are created.
 local stickLastCheck, stickLastDesc
 
 local function UpdateSeqIndexLabel()
@@ -101,25 +76,33 @@ local function UpdateSeqIndexLabel()
     end
 end
 
+local function SetModeActive(btn, active)
+    if active then
+        btn.bg:SetColorTexture(C.accentSecondary[1], C.accentSecondary[2], C.accentSecondary[3], 0.70)
+        btn.fill:SetColorTexture(C.tabActive[1], C.tabActive[2], C.tabActive[3], 1.0)
+        btn.lbl:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
+    else
+        btn.bg:SetColorTexture(C.accentSecondary[1], C.accentSecondary[2], C.accentSecondary[3], 0.30)
+        btn.fill:SetColorTexture(0.13, 0.10, 0.17, 0.75)
+        btn.lbl:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+    end
+end
+
 local function UpdateModeButtons()
     local mode = PWT.db and PWT.db.piMode or "priority"
     if mode == "priority" then
-        modePriorityBg:SetColorTexture(C.tabActive[1], C.tabActive[2], C.tabActive[3], 0.9)
-        modePriorityLbl:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
-        modeSequenceBg:SetColorTexture(0.1, 0.1, 0.12, 0.8)
-        modeSequenceLbl:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+        SetModeActive(modePriorityBtn, true)
+        SetModeActive(modeSequenceBtn, false)
         seqIndexLabel:Hide()
         stickLastCheck:Hide()
         stickLastDesc:Hide()
-        modeDescLabel:SetText("On any combat whisper, highlight the first player from the list who is in your group.")
+        modeDescLabel:SetText("When a group member whispers you in combat, the module glows the first player from your list who is currently in the group.")
     else
-        modeSequenceBg:SetColorTexture(C.tabActive[1], C.tabActive[2], C.tabActive[3], 0.9)
-        modeSequenceLbl:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
-        modePriorityBg:SetColorTexture(0.1, 0.1, 0.12, 0.8)
-        modePriorityLbl:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+        SetModeActive(modeSequenceBtn, true)
+        SetModeActive(modePriorityBtn, false)
         seqIndexLabel:Show()
         UpdateSeqIndexLabel()
-        modeDescLabel:SetText("On each combat whisper, highlight the next player in the sequence. Resets on boss pull.")
+        modeDescLabel:SetText("When a group member whispers you in combat, the module glows the next player in the sequence. Resets automatically on boss pull.")
         stickLastCheck:Show()
         stickLastDesc:Show()
     end
@@ -138,17 +121,19 @@ modeSequenceBtn:SetScript("OnClick", function()
 end)
 
 for _, info in ipairs({
-    { btn=modePriorityBtn, bg=modePriorityBg, key="priority" },
-    { btn=modeSequenceBtn, bg=modeSequenceBg, key="sequence" },
+    { btn = modePriorityBtn, key = "priority" },
+    { btn = modeSequenceBtn, key = "sequence" },
 }) do
     info.btn:SetScript("OnEnter", function()
         if (PWT.db.piMode or "priority") ~= info.key then
-            info.bg:SetColorTexture(C.tabHover[1], C.tabHover[2], C.tabHover[3], 0.7)
+            info.btn.bg:SetColorTexture(C.accentSecondary[1], C.accentSecondary[2], C.accentSecondary[3], 0.55)
+            info.btn.fill:SetColorTexture(0.20, 0.15, 0.26, 0.85)
         end
     end)
     info.btn:SetScript("OnLeave", function()
         if (PWT.db.piMode or "priority") ~= info.key then
-            info.bg:SetColorTexture(0.1, 0.1, 0.12, 0.8)
+            info.btn.bg:SetColorTexture(C.accentSecondary[1], C.accentSecondary[2], C.accentSecondary[3], 0.30)
+            info.btn.fill:SetColorTexture(0.13, 0.10, 0.17, 0.75)
         end
     end)
 end
@@ -156,39 +141,41 @@ end
 modePriorityBtn:Hide()
 modeSequenceBtn:Hide()
 
--- Stick-to-last toggle (sequence mode only)
-stickLastCheck = CreateFrame("CheckButton", nil, piPanel, "UICheckButtonTemplate")
-stickLastCheck:SetPoint("TOPLEFT", modeDescLabel, "BOTTOMLEFT", -2, -4)
-stickLastCheck.text:SetText("Repeat last entry after sequence ends")
-stickLastCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
-stickLastCheck:SetScript("OnClick", function(self)
-    PWT.db.piSequenceStickLast = self:GetChecked()
+-- Stick-to-last toggle (sequence mode only; forward-declared above)
+stickLastCheck = UI:MakeCheckbox(piPanel, "Repeat last entry after sequence ends", nil, function(val)
+    PWT.db.piSequenceStickLast = val
 end)
+stickLastCheck:SetPoint("TOPLEFT", modeDescLabel, "BOTTOMLEFT", 0, -4)
+stickLastCheck:SetPoint("RIGHT",   piPanel, "RIGHT", -PAD, 0)
 stickLastCheck:Hide()
 
 stickLastDesc = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-stickLastDesc:SetPoint("TOPLEFT", stickLastCheck, "BOTTOMLEFT", 26, -2)
-stickLastDesc:SetWidth(CONTENT_W - PAD * 2 - 30)
+stickLastDesc:SetPoint("TOPLEFT", stickLastCheck, "BOTTOMLEFT", 22, -2)
+stickLastDesc:SetWidth(CONTENT_W - PAD * 2 - 26)
 stickLastDesc:SetJustifyH("LEFT")
 stickLastDesc:SetText("When off, the sequence loops back to position 1 after the last entry.")
 stickLastDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 stickLastDesc:Hide()
 
 local piEnableLine = UI:MakeLine(piPanel, C.border, 1)
-piEnableLine:SetPoint("TOPLEFT",  stickLastDesc, "BOTTOMLEFT",  -26, -8)
+piEnableLine:SetPoint("TOPLEFT",  stickLastDesc, "BOTTOMLEFT",  -22, -8)
 piEnableLine:SetPoint("TOPRIGHT", piPanel, "TOPRIGHT", -PAD, -8)
 
--- Scroll frame for list + alert settings
+-- Scroll frame for list + add row + all settings sections
 local piScroll = CreateFrame("ScrollFrame", nil, piPanel, "UIPanelScrollFrameTemplate")
 piScroll:SetPoint("TOPLEFT",     piEnableLine, "BOTTOMLEFT",  0, -4)
 piScroll:SetPoint("BOTTOMRIGHT", piPanel,      "BOTTOMRIGHT", -PAD - 16, PAD)
+piScroll:SetScript("OnMouseWheel", function(self, delta)
+    local cur = self:GetVerticalScroll()
+    local max = self:GetVerticalScrollRange()
+    self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * 20)))
+end)
 
 local piScrollChild = CreateFrame("Frame", nil, piScroll)
 piScrollChild:SetWidth(CONTENT_W - PAD * 2 - 20)
-piScrollChild:SetHeight(1) -- will grow with content
+piScrollChild:SetHeight(1)
 piScroll:SetScrollChild(piScrollChild)
 
--- Priority list inside scroll child
 -- List scroll frame (fixed height, clips rows, scrolls if list grows)
 local listScroll = CreateFrame("ScrollFrame", nil, piScrollChild, "UIPanelScrollFrameTemplate")
 listScroll:SetPoint("TOPLEFT",  piScrollChild, "TOPLEFT",  0, 0)
@@ -197,7 +184,7 @@ listScroll:SetHeight(180)
 
 local listFrame = CreateFrame("Frame", nil, listScroll)
 listFrame:SetWidth(CONTENT_W - PAD * 2 - 36)
-listFrame:SetHeight(1)  -- grows with content
+listFrame:SetHeight(1)
 listScroll:SetScrollChild(listFrame)
 UI:MakeBg(listFrame, {0, 0, 0, 0.25})
 
@@ -210,7 +197,6 @@ RefreshList = function()
     local mode = PWT.db.piMode or "priority"
     local list = mode == "sequence" and PWT.db.piSequenceList or PWT.db.piList
 
-    -- Hide all pooled rows first so switching between lists is clean
     for _, row in ipairs(listRows) do
         row:Hide()
         row:ClearAllPoints()
@@ -236,14 +222,31 @@ RefreshList = function()
 
             local label = row:CreateFontString(nil, "OVERLAY", "PWT_FontNormal")
             label:SetPoint("LEFT",  badge, "RIGHT", 8, 0)
-            label:SetPoint("RIGHT", row, "RIGHT", -30, 0)
+            label:SetPoint("RIGHT", row, "RIGHT", -24, 0)
             label:SetJustifyH("LEFT")
             label:SetTextColor(C.text[1], C.text[2], C.text[3])
             row.label = label
 
-            local removeBtn = CreateFrame("Button", nil, row, "UIPanelCloseButton")
-            removeBtn:SetSize(20, 20)
-            removeBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+            local removeBtn = CreateFrame("Button", nil, row)
+            removeBtn:SetSize(14, 14)
+            removeBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+
+            local removeBg = removeBtn:CreateTexture(nil, "BACKGROUND")
+            removeBg:SetAllPoints(removeBtn)
+            removeBg:SetColorTexture(0.60, 0.25, 0.25, 0.60)
+
+            local removeLbl = removeBtn:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
+            removeLbl:SetAllPoints(removeBtn)
+            removeLbl:SetJustifyH("CENTER")
+            removeLbl:SetText("x")
+            removeLbl:SetTextColor(C.text[1], C.text[2], C.text[3])
+
+            removeBtn:SetScript("OnEnter", function()
+                removeBg:SetColorTexture(C.danger[1], C.danger[2], C.danger[3], 0.90)
+            end)
+            removeBtn:SetScript("OnLeave", function()
+                removeBg:SetColorTexture(0.60, 0.25, 0.25, 0.60)
+            end)
             removeBtn:SetScript("OnClick", function()
                 local m = PWT.db.piMode or "priority"
                 local l = m == "sequence" and PWT.db.piSequenceList or PWT.db.piList
@@ -293,7 +296,6 @@ RefreshList = function()
         row:SetWidth(CONTENT_W - PAD * 2 - 36)
         row.index = i
         row.badge:SetText(tostring(i))
-        -- In sequence mode, highlight the current target position
         if mode == "sequence" and i == (PWT.PI and PWT.PI.sequenceIndex or 1) then
             row.label:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
             row.badge:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
@@ -306,12 +308,10 @@ RefreshList = function()
             i % 2 == 0 and C.rowEven[1] or C.rowOdd[1],
             i % 2 == 0 and C.rowEven[2] or C.rowOdd[2],
             i % 2 == 0 and C.rowEven[3] or C.rowOdd[3],
-            i % 2 == 0 and C.rowEven[4] or C.rowOdd[4]
-        )
+            i % 2 == 0 and C.rowEven[4] or C.rowOdd[4])
         row:Show()
     end
 
-    -- Grow the scroll child to fit all rows
     local totalH = math.max(#list * 30, 1)
     listFrame:SetHeight(totalH)
 
@@ -321,88 +321,93 @@ RefreshList = function()
     end
 end
 
--- ── Alert Settings (collapsible) ────────────────────────────────────────
+-- ── Add player row ──────────────────────────────────────────────────────────
 
+local addRow = CreateFrame("Frame", nil, piScrollChild)
+addRow:SetHeight(28)
+addRow:SetPoint("TOPLEFT",  listScroll, "BOTTOMLEFT",  0, -10)
+addRow:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT",  0,  0)
 
+local addBtn = UI:MakeButton(addRow, "Add", function() end, "default")
+addBtn:SetSize(70, 26)
+addBtn:SetPoint("RIGHT", addRow, "RIGHT", 0, 0)
 
+local addBox = CreateFrame("EditBox", nil, addRow, "InputBoxTemplate")
+addBox:SetSize(220, 24)
+addBox:SetPoint("RIGHT", addBtn, "LEFT", -8, 0)
+addBox:SetAutoFocus(false)
+addBox:SetMaxLetters(64)
+addBox:SetScript("OnEnterPressed", function(self)
+    local name = strtrim(self:GetText())
+    if name ~= "" then
+        local m = PWT.db.piMode or "priority"
+        local l = m == "sequence" and PWT.db.piSequenceList or PWT.db.piList
+        table.insert(l, name)
+        self:SetText("")
+        RefreshList()
+        if m == "sequence" then UpdateSeqIndexLabel() end
+    end
+end)
 
-local alertCollapsed   = true  -- default collapsed
-local overlayCollapsed = true
-local PI_SyncAlerts    -- forward declaration — assigned after controls are built
-local PI_SyncOverlay   -- forward declaration — assigned after overlay section is built
-local UpdateScrollHeight  -- forward declaration — assigned after overlay section is built
+local addHint = addBox:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
+addHint:SetPoint("LEFT", addBox, "LEFT", 4, 0)
+addHint:SetText("Player name...")
+addHint:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+addBox:SetScript("OnTextChanged", function(self)
+    addHint:SetShown(self:GetText() == "")
+end)
+
+-- Wire up the Add button now that addBox exists
+addBtn:SetScript("OnClick", function()
+    local name = strtrim(addBox:GetText())
+    if name ~= "" then
+        local m = PWT.db.piMode or "priority"
+        local l = m == "sequence" and PWT.db.piSequenceList or PWT.db.piList
+        table.insert(l, name)
+        addBox:SetText("")
+        RefreshList()
+        if m == "sequence" then UpdateSeqIndexLabel() end
+    end
+end)
+
+-- ── Alert Settings ──────────────────────────────────────────────────────────
+
+local PI_SyncAlerts  -- forward declaration — assigned after controls are built
+local PI_SyncOverlay -- forward declaration — assigned after overlay section is built
+
+local listHint = piScrollChild:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
+listHint:SetPoint("TOPLEFT", addRow, "BOTTOMLEFT", 0, -4)
+listHint:SetWidth(CONTENT_W - PAD * 2 - 20)
+listHint:SetJustifyH("LEFT")
+listHint:SetText("Enter character name only \226\128\148 no realm suffix (e.g. \"Playername\", not \"Playername-Realm\").")
+listHint:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
 local alertLine = UI:MakeLine(piScrollChild, C.border, 1)
-alertLine:SetPoint("TOPLEFT",  listScroll, "BOTTOMLEFT",  0, -12)
-alertLine:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT", 0, -12)
+alertLine:SetPoint("TOPLEFT",  listHint, "BOTTOMLEFT",  0, -10)
+alertLine:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT", 0, -10)
 
--- Collapsible header button
-local alertToggleBtn = CreateFrame("Button", nil, piScrollChild)
-alertToggleBtn:SetPoint("TOPLEFT", alertLine, "BOTTOMLEFT", 0, -6)
-alertToggleBtn:SetHeight(22)
-alertToggleBtn:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT", 0, -6)
+local alertSectionHdr = UI:MakeSectionHeader(piScrollChild, alertLine, -8, "Alert Settings")
 
-local alertArrow = alertToggleBtn:CreateFontString(nil, "OVERLAY", "PWT_FontNormal")
-alertArrow:SetPoint("LEFT", alertToggleBtn, "LEFT", 0, 0)
-alertArrow:SetText("|cffcc99ff+ Alert Settings|r")
-
-local alertHeaderHint = alertToggleBtn:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-alertHeaderHint:SetPoint("RIGHT", alertToggleBtn, "RIGHT", 0, 0)
-alertHeaderHint:SetText("click to expand")
-alertHeaderHint:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
-
--- Alert content container (shown/hidden by toggle)
 local alertContent = CreateFrame("Frame", nil, piScrollChild)
-alertContent:SetPoint("TOPLEFT",  alertToggleBtn, "BOTTOMLEFT",  0, -6)
-alertContent:SetPoint("TOPRIGHT", piScrollChild,  "TOPRIGHT", 0, -6)
-alertContent:SetHeight(390)  -- tall enough for all controls
-alertContent:Hide()  -- collapsed by default
+alertContent:SetPoint("TOPLEFT",  alertSectionHdr, "BOTTOMLEFT",  0, -8)
+alertContent:SetPoint("TOPRIGHT", piScrollChild,   "TOPRIGHT",    0, 0)
+alertContent:SetHeight(580)
 
-local ReanchorOverlayLine  -- forward ref
-
-local function UpdateAlertToggle()
-    if alertCollapsed then
-        alertArrow:SetText("|cffcc99ff+ Alert Settings|r")
-        alertHeaderHint:SetText("click to expand")
-        alertContent:Hide()
-    else
-        alertArrow:SetText("|cffcc99ff- Alert Settings|r")
-        alertHeaderHint:SetText("click to collapse")
-        alertContent:Show()
-    end
-    if ReanchorOverlayLine then ReanchorOverlayLine() end
-    if UpdateScrollHeight then UpdateScrollHeight() end
-end
-
-alertToggleBtn:SetScript("OnClick", function()
-    alertCollapsed = not alertCollapsed
-    UpdateAlertToggle()
-end)
-alertToggleBtn:SetScript("OnEnter", function()
-    alertArrow:SetText("|cffffffff" .. (alertCollapsed and "+ Alert Settings" or "- Alert Settings") .. "|r")
-end)
-alertToggleBtn:SetScript("OnLeave", function()
-    alertArrow:SetText("|cffcc99ff" .. (alertCollapsed and "+ Alert Settings" or "- Alert Settings") .. "|r")
-end)
-
--- ── Glow section ─────────────────────────────────────────────────────
+-- ── Glow section ──────────────────────────────────────────────────────────
 
 local glowSectionLabel = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontNormal")
 glowSectionLabel:SetPoint("TOPLEFT", alertContent, "TOPLEFT", 0, 0)
 glowSectionLabel:SetText("Glow")
 glowSectionLabel:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
 
-local glowEnableCheck = CreateFrame("CheckButton", nil, alertContent, "UICheckButtonTemplate")
-glowEnableCheck:SetPoint("TOPLEFT", glowSectionLabel, "BOTTOMLEFT", -2, -4)
-glowEnableCheck.text:SetText("Enable glow on raid frame")
-glowEnableCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
-glowEnableCheck:SetScript("OnClick", function(self)
-    PWT.db.pi.glowEnabled = self:GetChecked()
+local glowEnableCheck = UI:MakeCheckbox(alertContent, "Enable glow on raid frame", nil, function(val)
+    PWT.db.pi.glowEnabled = val
 end)
+glowEnableCheck:SetPoint("TOPLEFT", glowSectionLabel, "BOTTOMLEFT", 0, -4)
+glowEnableCheck:SetPoint("RIGHT",   alertContent, "RIGHT", 0, 0)
 
--- Style selector — two buttons side by side
 local styleLabel = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-styleLabel:SetPoint("TOPLEFT", glowEnableCheck, "BOTTOMLEFT", 26, -6)
+styleLabel:SetPoint("TOPLEFT", glowEnableCheck, "BOTTOMLEFT", 22, -6)
 styleLabel:SetText("Style:")
 styleLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
@@ -416,13 +421,12 @@ local UpdateVarSlider  -- forward declaration
 local function UpdateStyleButtons()
     local current = PWT.db and PWT.db.pi and PWT.db.pi.glowStyle or "overlay"
     for _, btn in ipairs(styleButtons) do
-        if btn.styleKey == current then
-            btn:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
-            btn.bg:SetColorTexture(C.tabActive[1], C.tabActive[2], C.tabActive[3], 0.9)
-        else
-            btn:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
-            btn.bg:SetColorTexture(0.1, 0.1, 0.12, 0.8)
-        end
+        local isActive = (btn.styleKey == current)
+        UI:StyleButton(btn, isActive)
+        btn:SetTextColor(
+            isActive and C.textAccent[1] or C.textMuted[1],
+            isActive and C.textAccent[2] or C.textMuted[2],
+            isActive and C.textAccent[3] or C.textMuted[3])
     end
     if UpdateVarSlider then UpdateVarSlider() end
 end
@@ -467,7 +471,6 @@ for i, style in ipairs(GLOW_STYLES) do
     styleButtons[i] = btn
 end
 
--- ── Row helper: creates a label + slider row anchored below 'anchor'
 local function makeSliderRow(anchor, labelText, minV, maxV, step, lowText, highText, onChange)
     local row = CreateFrame("Frame", nil, alertContent)
     row:SetHeight(36)
@@ -489,12 +492,12 @@ local function makeSliderRow(anchor, labelText, minV, maxV, step, lowText, highT
     sl.Low:SetText(lowText)
     sl.High:SetText(highText)
     sl.Text:SetText("")
+    if UI.StyleSliderThumb then UI:StyleSliderThumb(sl) end
     sl:SetScript("OnValueChanged", onChange)
     row.slider = sl
     return row
 end
 
--- Color row
 local colorRow = CreateFrame("Frame", nil, alertContent)
 colorRow:SetHeight(26)
 colorRow:SetPoint("TOPLEFT",  styleLabel, "BOTTOMLEFT",  0, -12)
@@ -528,9 +531,7 @@ local function OpenColorPicker()
         local nr, ng, nb
         if restore then nr, ng, nb = r, g, b
         else nr, ng, nb = ColorPickerFrame:GetColorRGB() end
-        PWT.db.pi.glowR = nr
-        PWT.db.pi.glowG = ng
-        PWT.db.pi.glowB = nb
+        PWT.db.pi.glowR = nr; PWT.db.pi.glowG = ng; PWT.db.pi.glowB = nb
         colorSwatchTex:SetColorTexture(nr, ng, nb, 1.0)
     end
     if ColorPickerFrame.SetupColorPickerAndShow then
@@ -552,7 +553,6 @@ colorSwatch:SetScript("OnEnter", function()
 end)
 colorSwatch:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
--- Opacity row (overlay mode)
 local opacityRow = makeSliderRow(colorRow, "Opacity:", 0.1, 1.0, 0.05, "10%", "100%",
     function(self, val)
         PWT.db.pi.glowOpacity = val
@@ -560,7 +560,6 @@ local opacityRow = makeSliderRow(colorRow, "Opacity:", 0.1, 1.0, 0.05, "10%", "1
     end)
 local opacitySlider = opacityRow.slider
 
--- Thickness row (border mode) — same position as opacity row, swapped in/out
 local thickRow = makeSliderRow(colorRow, "Thickness:", 1, 10, 1, "1", "10",
     function(self, val)
         val = math.floor(val + 0.5)
@@ -574,25 +573,19 @@ UpdateVarSlider = function()
     if not PWT.db or not PWT.db.pi then return end
     local mode = PWT.db.pi.glowStyle or "overlay"
     if mode == "border" then
-        opacityRow:Hide()
-        thickRow:Show()
+        opacityRow:Hide(); thickRow:Show()
         thickSlider:SetValue(PWT.db.pi.borderThickness or 3)
     else
-        thickRow:Hide()
-        opacityRow:Show()
+        thickRow:Hide(); opacityRow:Show()
         opacitySlider:SetValue(PWT.db.pi.glowOpacity or 0.55)
     end
 end
 
--- Pulse row
--- varSpacer: fixed-height invisible frame that sits below colorRow,
--- giving pulseRow a stable anchor regardless of which var row is shown
 local varSpacer = CreateFrame("Frame", nil, alertContent)
 varSpacer:SetHeight(46)
 varSpacer:SetPoint("TOPLEFT",  colorRow, "BOTTOMLEFT",  0, -10)
 varSpacer:SetPoint("TOPRIGHT", alertContent, "TOPRIGHT", 0, -10)
 
--- Re-anchor opacity and thick rows inside varSpacer
 opacityRow:ClearAllPoints()
 opacityRow:SetPoint("TOPLEFT",  varSpacer, "TOPLEFT",  0, 0)
 opacityRow:SetPoint("TOPRIGHT", varSpacer, "TOPRIGHT", 0, 0)
@@ -607,19 +600,12 @@ local pulseRow = makeSliderRow(varSpacer, "Pulse:", 0.1, 2.0, 0.1, "Fast", "Slow
     end)
 local pulseSlider = pulseRow.slider
 
-local glowTestBtn = CreateFrame("Button", nil, alertContent, "UIPanelButtonTemplate")
-glowTestBtn:SetSize(60, 22)
-glowTestBtn:SetPoint("LEFT", pulseSlider, "RIGHT", 10, 0)
-glowTestBtn:SetText("Test")
-glowTestBtn:SetScript("OnClick", function()
+local glowTestBtn = UI:MakeButton(alertContent, "Test", function()
     PWT.PI:BuildSoundList()
     local unitToken = "player"
     if IsInRaid() then
         for i = 1, GetNumGroupMembers() do
-            if UnitIsUnit("raid"..i, "player") then
-                unitToken = "raid"..i
-                break
-            end
+            if UnitIsUnit("raid"..i, "player") then unitToken = "raid"..i; break end
         end
     end
     local playerName = GetUnitName("player", false) or "preview"
@@ -628,19 +614,14 @@ glowTestBtn:SetScript("OnClick", function()
     if testFrame then
         PWT.PI:ApplyGlow(testFrame, playerName)
     else
-        if PWT.db.pi.soundEnabled ~= false then
-            PWT.PI:PlayCurrentSound()
-        end
+        if PWT.db.pi.soundEnabled ~= false then PWT.PI:PlayCurrentSound() end
         PWT:Print("No raid frame found — sound only. Join a group to test the glow.")
     end
-end)
+end, "default")
+glowTestBtn:SetSize(60, 22)
+glowTestBtn:SetPoint("LEFT", pulseSlider, "RIGHT", 10, 0)
 
--- Glow reset to defaults
-local glowResetBtn = CreateFrame("Button", nil, alertContent, "UIPanelButtonTemplate")
-glowResetBtn:SetSize(80, 22)
-glowResetBtn:SetPoint("TOPLEFT", pulseRow, "BOTTOMLEFT", 0, -10)
-glowResetBtn:SetText("Reset Glow")
-glowResetBtn:SetScript("OnClick", function()
+local glowResetBtn = UI:MakeButton(alertContent, "Reset Glow", function()
     PWT.db.pi.glowEnabled      = true
     PWT.db.pi.glowStyle        = "overlay"
     PWT.db.pi.borderThickness  = 3
@@ -651,324 +632,176 @@ glowResetBtn:SetScript("OnClick", function()
     PWT.db.pi.glowPulse        = 0.6
     PI_SyncAlerts()
     PWT:Print("Glow settings reset to defaults.")
-end)
+end, "default")
+glowResetBtn:SetSize(90, 24)
+glowResetBtn:SetPoint("TOPLEFT", pulseRow, "BOTTOMLEFT", -22, -10)
 
--- ── Sound section ─────────────────────────────────────────────────────
+-- ── Sound section ─────────────────────────────────────────────────────────
+
+local soundLine = UI:MakeLine(alertContent, C.border, 1)
+soundLine:SetPoint("TOPLEFT",  glowResetBtn, "BOTTOMLEFT",  0, -12)
+soundLine:SetPoint("TOPRIGHT", alertContent, "TOPRIGHT",    0, -12)
 
 local soundSectionLabel = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontNormal")
-soundSectionLabel:SetPoint("TOPLEFT", glowResetBtn, "BOTTOMLEFT", 0, -14)
+soundSectionLabel:SetPoint("TOPLEFT", soundLine, "BOTTOMLEFT", 0, -8)
 soundSectionLabel:SetText("Sound")
 soundSectionLabel:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
 
-local soundEnableCheck = CreateFrame("CheckButton", nil, alertContent, "UICheckButtonTemplate")
-soundEnableCheck:SetPoint("TOPLEFT", soundSectionLabel, "BOTTOMLEFT", -2, -4)
-soundEnableCheck.text:SetText("Enable alert sound")
-soundEnableCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
-soundEnableCheck:SetScript("OnClick", function(self)
-    PWT.db.pi.soundEnabled = self:GetChecked()
+local soundEnableCheck = UI:MakeCheckbox(alertContent, "Enable alert sound", nil, function(val)
+    PWT.db.pi.soundEnabled = val
 end)
+soundEnableCheck:SetPoint("TOPLEFT", soundSectionLabel, "BOTTOMLEFT", 0, -4)
+soundEnableCheck:SetPoint("RIGHT",   alertContent, "RIGHT", 0, 0)
 
-
-
-
-
--- Dropdown button (custom styled to match the UI)
 local soundDropLabel = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-soundDropLabel:SetPoint("TOPLEFT", soundEnableCheck, "BOTTOMLEFT", 26, -6)
+soundDropLabel:SetPoint("TOPLEFT", soundEnableCheck, "BOTTOMLEFT", 22, -6)
 soundDropLabel:SetText("Sound:")
 soundDropLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
-local soundDropBtn = CreateFrame("Button", nil, alertContent, "UIPanelButtonTemplate")
-soundDropBtn:SetSize(180, 22)
-soundDropBtn:SetPoint("LEFT", soundDropLabel, "RIGHT", 8, 0)
-
-local soundDropBtnText = soundDropBtn:GetFontString()
-soundDropBtnText:SetText("Alarm Clock")
-
-local soundPreviewBtn = CreateFrame("Button", nil, alertContent, "UIPanelButtonTemplate")
-soundPreviewBtn:SetSize(60, 22)
-soundPreviewBtn:SetPoint("LEFT", soundDropBtn, "RIGHT", 6, 0)
-soundPreviewBtn:SetText("Preview")
-soundPreviewBtn:SetScript("OnClick", function() PWT.PI:PlayCurrentSound() end)
+local soundDd = UI:MakeDropdown(alertContent,
+    function()
+        PWT.PI:BuildSoundList()
+        local list = PWT.PI.soundList or {}
+        local result = {}
+        for i, entry in ipairs(list) do result[i] = { label = entry.label, value = i } end
+        return result
+    end,
+    function(entry)
+        if PWT.db and PWT.db.pi then PWT.db.pi.soundIndex = entry.value end
+        local list = PWT.PI.soundList or {}
+        local name = (list[entry.value] and list[entry.value].label) or "Unknown"
+        if #name > 28 then name = name:sub(1, 25) .. "..." end
+        soundDd.setLabel(name)
+    end,
+    { width=190, popupW=240, popupH=200, rowH=20,
+      getSelected = function() return (PWT.db and PWT.db.pi and PWT.db.pi.soundIndex) or 5 end })
+soundDd.button:SetPoint("LEFT", soundDropLabel, "RIGHT", 8, 0)
 
 local function UpdateDropLabel()
-    local idx = PWT.db and PWT.db.pi and PWT.db.pi.soundIndex or 5
-    local entry = PWT.PI.soundList[idx]
-    local name = entry and entry.label or "Unknown"
-    -- Truncate if too long for the button
-    if #name > 28 then
-        name = name:sub(1, 25) .. "..."
-    end
-    soundDropBtnText:SetText(name)
+    local idx  = (PWT.db and PWT.db.pi and PWT.db.pi.soundIndex) or 5
+    local list = PWT.PI.soundList or {}
+    local name = (list[idx] and list[idx].label) or "Alarm Clock"
+    if #name > 28 then name = name:sub(1, 25) .. "..." end
+    soundDd.setLabel(name)
 end
 
--- ── Custom scrollable dropdown ────────────────────────────────
-local DROPDOWN_H    = 200
-local ROW_H         = 20
-local dropPanel = CreateFrame("Frame", "PWT_SoundDropPanel", UIParent)
-dropPanel:SetSize(248, DROPDOWN_H)
-dropPanel:SetFrameStrata("TOOLTIP")
-dropPanel:SetFrameLevel(100)
-dropPanel:Hide()
+local soundPreviewBtn = UI:MakeButton(alertContent, "Preview", function()
+    PWT.PI:PlayCurrentSound()
+end, "default")
+soundPreviewBtn:SetSize(60, 22)
+soundPreviewBtn:SetPoint("LEFT", soundDd.button, "RIGHT", 6, 0)
 
-UI:MakeBg(dropPanel, {0.06, 0.06, 0.08, 0.98})
-local dropBorder = dropPanel:CreateTexture(nil, "OVERLAY")
-dropBorder:SetAllPoints(dropPanel)
-dropBorder:SetColorTexture(0, 0, 0, 0)
-local function addDropLine(p1, rP, ox, oy)
-    local t = dropPanel:CreateTexture(nil, "OVERLAY")
-    t:SetColorTexture(C.border[1], C.border[2], C.border[3], C.border[4])
-    t:SetHeight(1)
-    t:SetPoint(p1, dropPanel, rP, ox, oy)
-    t:SetPoint(p1 == "TOPLEFT" and "TOPRIGHT" or "BOTTOMRIGHT",
-               dropPanel, p1 == "TOPLEFT" and "TOPRIGHT" or "BOTTOMRIGHT", -ox, oy)
-end
-addDropLine("TOPLEFT",    "TOPLEFT",    0,  0)
-addDropLine("BOTTOMLEFT", "BOTTOMLEFT", 0,  0)
+local volRow = UI:MakeSlider(alertContent, "Volume:", 0.0, 1.0, 0.05,
+    function(val) return string.format("%d%%", math.floor(val * 100 + 0.5)) end,
+    function(val) if PWT.db and PWT.db.pi then PWT.db.pi.soundVolume = val end end)
+volRow:SetPoint("TOPLEFT", soundDropLabel, "BOTTOMLEFT", 0, -18)
+volRow:SetPoint("RIGHT",   alertContent, "RIGHT", 0, 0)
 
-local dropScroll = CreateFrame("ScrollFrame", nil, dropPanel, "UIPanelScrollFrameTemplate")
-dropScroll:SetPoint("TOPLEFT",     dropPanel, "TOPLEFT",     4, -4)
-dropScroll:SetPoint("BOTTOMRIGHT", dropPanel, "BOTTOMRIGHT", -22, 4)
-
-local DROP_ROW_W = 218  -- fixed width matching panel minus scrollbar
-local dropChild = CreateFrame("Frame", nil, dropScroll)
-dropChild:SetWidth(DROP_ROW_W)
-dropChild:SetHeight(1)
-dropScroll:SetScrollChild(dropChild)
-
-local dropRows = {}
-
-local function HideDropdown()
-    dropPanel:Hide()
-end
-
-local function PopulateDropdown()
-    for _, r in ipairs(dropRows) do r:Hide() end
-    wipe(dropRows)
-
-    local currentIdx = PWT.db and PWT.db.pi and PWT.db.pi.soundIndex or 5
-
-    local soundList = PWT.PI.soundList
-    for i, entry in ipairs(soundList) do
-        local row = CreateFrame("Button", nil, dropChild)
-        row:SetSize(DROP_ROW_W, ROW_H)
-        row:SetPoint("TOPLEFT", dropChild, "TOPLEFT", 0, -(i - 1) * ROW_H)
-
-        local rowBg = row:CreateTexture(nil, "BACKGROUND")
-        rowBg:SetAllPoints(row)
-        row.bg = rowBg
-
-        local rowLabel = row:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-        rowLabel:SetPoint("LEFT",  row, "LEFT",  6, 0)
-        rowLabel:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-        rowLabel:SetJustifyH("LEFT")
-
-        if i == currentIdx then
-            rowBg:SetColorTexture(C.tabActive[1], C.tabActive[2], C.tabActive[3], 0.8)
-            rowLabel:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
-        else
-            rowBg:SetColorTexture(0, 0, 0, 0)
-            rowLabel:SetTextColor(C.text[1], C.text[2], C.text[3])
-        end
-        rowLabel:SetText(entry.label)
-
-        row:SetScript("OnEnter", function(self)
-            if i ~= (PWT.db.pi.soundIndex or 5) then
-                self.bg:SetColorTexture(C.tabHover[1], C.tabHover[2], C.tabHover[3], 0.6)
-            end
-        end)
-        row:SetScript("OnLeave", function(self)
-            if i ~= (PWT.db.pi.soundIndex or 5) then
-                self.bg:SetColorTexture(0, 0, 0, 0)
-            end
-        end)
-        row:SetScript("OnClick", function()
-            PWT.db.pi.soundIndex = i
-            UpdateDropLabel()
-            HideDropdown()
-        end)
-
-        row:Show()
-        dropRows[i] = row
-    end
-
-    local totalH = #soundList * ROW_H
-    dropChild:SetHeight(math.max(totalH, 1))
-
-    -- Scroll to show selected entry
-    local scrollMax = math.max(0, totalH - DROPDOWN_H + 8)
-    local scrollTo  = math.max(0, math.min(scrollMax, (currentIdx - 1) * ROW_H - DROPDOWN_H / 2))
-    dropScroll:SetVerticalScroll(scrollTo)
-end
-
-soundDropBtn:SetScript("OnClick", function(self)
-    if dropPanel:IsShown() then
-        HideDropdown()
-        return
-    end
-    PWT.PI:BuildSoundList()
-    PopulateDropdown()
-    dropPanel:ClearAllPoints()
-    dropPanel:SetPoint("TOPLEFT", soundDropBtn, "BOTTOMLEFT", 0, -2)
-    dropPanel:Show()
-    dropPanel:SetScript("OnLeave", nil)
-end)
-
--- Close dropdown when clicking elsewhere
-dropPanel:SetScript("OnHide", function() end)
-local dropWatcher = CreateFrame("Frame", nil, UIParent)
-dropWatcher:SetAllPoints(UIParent)
-dropWatcher:SetFrameStrata("DIALOG")
-dropWatcher:EnableMouse(false)
-dropWatcher:Hide()
-dropPanel:HookScript("OnShow", function()
-    dropWatcher:EnableMouse(true)
-    dropWatcher:Show()
-    dropWatcher:SetScript("OnMouseDown", function(self, btn)
-        HideDropdown()
-        self:EnableMouse(false)
-        self:Hide()
-    end)
-end)
-dropPanel:HookScript("OnHide", function()
-    dropWatcher:EnableMouse(false)
-    dropWatcher:Hide()
-end)
-
-local volLabel = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-volLabel:SetPoint("TOPLEFT", soundDropLabel, "BOTTOMLEFT", 0, -18)
-volLabel:SetText("Volume:")
-volLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
-
-local volSlider = CreateFrame("Slider", nil, alertContent, "OptionsSliderTemplate")
-volSlider:SetSize(140, 16)
-volSlider:SetPoint("LEFT", volLabel, "RIGHT", 8, 0)
-volSlider:SetMinMaxValues(0.0, 1.0)
-volSlider:SetValueStep(0.05)
-volSlider:SetObeyStepOnDrag(true)
-volSlider.Low:SetText("0%")
-volSlider.High:SetText("100%")
-volSlider.Text:SetText("")
-volSlider:SetScript("OnValueChanged", function(self, val)
-    PWT.db.pi.soundVolume = val
-    self.Text:SetText(string.format("%d%%", math.floor(val * 100 + 0.5)))
-end)
-
--- Sound reset to defaults
-local soundResetBtn = CreateFrame("Button", nil, alertContent, "UIPanelButtonTemplate")
-soundResetBtn:SetSize(90, 22)
-soundResetBtn:SetPoint("TOPLEFT", volLabel, "BOTTOMLEFT", -26, -18)
-soundResetBtn:SetText("Reset Sound")
-soundResetBtn:SetScript("OnClick", function()
+local soundResetBtn = UI:MakeButton(alertContent, "Reset Sound", function()
     PWT.db.pi.soundEnabled = true
     PWT.db.pi.soundIndex   = 5
     PWT.db.pi.soundVolume  = 1.0
     PI_SyncAlerts()
     PWT:Print("Sound settings reset to defaults.")
+end, "default")
+soundResetBtn:SetSize(100, 24)
+soundResetBtn:SetPoint("TOPLEFT", volRow, "BOTTOMLEFT", -22, -10)
+
+-- ── Early Request Grace Period ────────────────────────────────────────────
+
+local earlyLine = UI:MakeLine(alertContent, C.border, 1)
+earlyLine:SetPoint("TOPLEFT",  soundResetBtn, "BOTTOMLEFT",  0, -14)
+earlyLine:SetPoint("TOPRIGHT", alertContent,  "TOPRIGHT",    0, -14)
+
+local earlySectionLabel = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontNormal")
+earlySectionLabel:SetPoint("TOPLEFT", earlyLine, "BOTTOMLEFT", 0, -8)
+earlySectionLabel:SetText("Early Request")
+earlySectionLabel:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
+
+local earlyEnableCheck = UI:MakeCheckbox(alertContent, "Alert when PI is almost off cooldown", nil, function(val)
+    PWT.db.pi.earlyRequestEnabled = val
 end)
+earlyEnableCheck:SetPoint("TOPLEFT", earlySectionLabel, "BOTTOMLEFT", 0, -4)
+earlyEnableCheck:SetPoint("RIGHT",   alertContent, "RIGHT", 0, 0)
 
+local earlyDesc = alertContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
+earlyDesc:SetPoint("TOPLEFT", earlyEnableCheck, "BOTTOMLEFT", 22, -2)
+earlyDesc:SetWidth(CONTENT_W - PAD * 2 - 30)
+earlyDesc:SetJustifyH("LEFT")
+earlyDesc:SetText("When a PI whisper arrives within the grace window before the cooldown expires, trigger the glow and show a countdown overlay.")
+earlyDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
+local earlyWindowRow = makeSliderRow(earlyDesc, "Grace window:", 1, 10, 1, "1s", "10s",
+    function(self, val)
+        val = math.floor(val + 0.5)
+        if PWT.db and PWT.db.pi then PWT.db.pi.earlyRequestWindow = val end
+        self.Text:SetText(tostring(val) .. "s")
+    end)
+local earlyWindowSlider = earlyWindowRow.slider
 
--- Sync all PI alert controls when tab opens
--- Fills the forward declaration above
 PI_SyncAlerts = function()
     if not PWT.db or not PWT.db.pi then return end
     local cfg = PWT.db.pi
-    glowEnableCheck:SetChecked(cfg.glowEnabled ~= false)
-    soundEnableCheck:SetChecked(cfg.soundEnabled ~= false)
+    glowEnableCheck.set(cfg.glowEnabled ~= false)
+    soundEnableCheck.set(cfg.soundEnabled ~= false)
     pulseSlider:SetValue(cfg.glowPulse or 0.6)
-    volSlider:SetValue(cfg.soundVolume or 1.0)
+    volRow.set(cfg.soundVolume or 1.0)
     PWT.PI:BuildSoundList()
     UpdateDropLabel()
-    UpdateStyleButtons()  -- also calls UpdateVarSlider
+    UpdateStyleButtons()
     colorSwatchTex:SetColorTexture(cfg.glowR or 1, cfg.glowG or 0.85, cfg.glowB or 0, 1.0)
+    earlyEnableCheck.set(cfg.earlyRequestEnabled == true)
+    earlyWindowSlider:SetValue(cfg.earlyRequestWindow or 5)
+    earlyWindowRow.slider.Text:SetText((cfg.earlyRequestWindow or 5) .. "s")
 end
 
--- ── Name Overlay section ─────────────────────────────────────────────────
+-- ── Name Overlay ──────────────────────────────────────────────────────────
 
 local overlayLine = UI:MakeLine(piScrollChild, C.border, 1)
-overlayLine:SetPoint("TOPLEFT",  alertToggleBtn, "BOTTOMLEFT",  0, -12)
-overlayLine:SetPoint("TOPRIGHT", piScrollChild,  "TOPRIGHT",    0, -12)
+overlayLine:SetPoint("TOPLEFT",  earlyWindowRow, "BOTTOMLEFT", -22, -12)
+overlayLine:SetPoint("TOPRIGHT", piScrollChild,  "TOPRIGHT",     0, -12)
 
-ReanchorOverlayLine = function()
-    overlayLine:ClearAllPoints()
-    if alertCollapsed then
-        overlayLine:SetPoint("TOPLEFT",  alertToggleBtn, "BOTTOMLEFT",  0, -12)
-    else
-        overlayLine:SetPoint("TOPLEFT",  soundResetBtn,  "BOTTOMLEFT",  0, -12)
-    end
-    overlayLine:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT", 0, -12)
-end
-
-local overlayToggleBtn = CreateFrame("Button", nil, piScrollChild)
-overlayToggleBtn:SetPoint("TOPLEFT",  overlayLine, "BOTTOMLEFT",  0, -6)
-overlayToggleBtn:SetPoint("TOPRIGHT", piScrollChild, "TOPRIGHT",  0, -6)
-overlayToggleBtn:SetHeight(22)
-
-local overlayArrow = overlayToggleBtn:CreateFontString(nil, "OVERLAY", "PWT_FontNormal")
-overlayArrow:SetPoint("LEFT", overlayToggleBtn, "LEFT", 0, 0)
-overlayArrow:SetText("|cffcc99ff+ Name Overlay|r")
-
-local overlayHeaderHint = overlayToggleBtn:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-overlayHeaderHint:SetPoint("RIGHT", overlayToggleBtn, "RIGHT", 0, 0)
-overlayHeaderHint:SetText("click to expand")
-overlayHeaderHint:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+local overlaySectionHdr = UI:MakeSectionHeader(piScrollChild, overlayLine, -8, "Name Overlay")
 
 local overlayContent = CreateFrame("Frame", nil, piScrollChild)
-overlayContent:SetPoint("TOPLEFT",  overlayToggleBtn, "BOTTOMLEFT",  0, -6)
-overlayContent:SetPoint("TOPRIGHT", piScrollChild,    "TOPRIGHT",    0, -6)
-overlayContent:SetHeight(130)
-overlayContent:Hide()
+overlayContent:SetPoint("TOPLEFT",  overlaySectionHdr, "BOTTOMLEFT",  0, -8)
+overlayContent:SetPoint("TOPRIGHT", piScrollChild,     "TOPRIGHT",    0, 0)
+overlayContent:SetHeight(140)
 
--- Forward declare for cross-ref between enable check and lock button
+local overlayLockBtn
 local overlayLocked = true
-local overlayLockBtn  -- assigned below
 
-local overlayEnableCheck = CreateFrame("CheckButton", nil, overlayContent, "UICheckButtonTemplate")
-overlayEnableCheck:SetPoint("TOPLEFT", overlayContent, "TOPLEFT", 0, 0)
-overlayEnableCheck.text:SetText("Show floating name overlay")
-overlayEnableCheck.text:SetTextColor(C.text[1], C.text[2], C.text[3])
-overlayEnableCheck:SetScript("OnClick", function(self)
-    PWT.db.pi.overlayEnabled = self:GetChecked()
-    if not self:GetChecked() then
+local overlayEnableCheck = UI:MakeCheckbox(overlayContent, "Show floating name overlay", nil, function(val)
+    PWT.db.pi.overlayEnabled = val
+    if not val then
         PWT.PI:ForceHideOverlay()
-        overlayLockBtn:SetText("Unlock to Move")
+        overlayLockBtn.lbl:SetText("Unlock to Move")
+        overlayLockBtn.lbl:SetTextColor(C.text[1], C.text[2], C.text[3])
         overlayLocked = true
     end
 end)
+overlayEnableCheck:SetPoint("TOPLEFT", overlayContent, "TOPLEFT", 0, 0)
+overlayEnableCheck:SetPoint("RIGHT",   overlayContent, "RIGHT",   0, 0)
 
 local overlayEnableDesc = overlayContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-overlayEnableDesc:SetPoint("TOPLEFT", overlayEnableCheck, "BOTTOMLEFT", 26, -2)
+overlayEnableDesc:SetPoint("TOPLEFT", overlayEnableCheck, "BOTTOMLEFT", 22, -2)
 overlayEnableDesc:SetWidth(CONTENT_W - PAD * 2 - 30)
 overlayEnableDesc:SetJustifyH("LEFT")
 overlayEnableDesc:SetText("Displays a floating frame with the PI target's name and spell icon.")
 overlayEnableDesc:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
 
-local overlaySizeLabel = overlayContent:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-overlaySizeLabel:SetPoint("TOPLEFT", overlayEnableDesc, "BOTTOMLEFT", 0, -10)
-overlaySizeLabel:SetText("Font Size:")
-overlaySizeLabel:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
+local overlaySizeRow = UI:MakeSlider(overlayContent, "Font size:", 10, 48, 1,
+    function(val) return tostring(math.floor(val)) .. "px" end,
+    function(val)
+        if PWT.db and PWT.db.pi then PWT.db.pi.overlayFontSize = math.floor(val) end
+        PWT.PI:UpdateOverlayFont()
+    end)
+overlaySizeRow:SetPoint("TOPLEFT", overlayEnableDesc, "BOTTOMLEFT", 0, -10)
+overlaySizeRow:SetPoint("RIGHT",   overlayContent, "RIGHT", 0, 0)
 
-local overlaySizeSlider = CreateFrame("Slider", nil, overlayContent, "OptionsSliderTemplate")
-overlaySizeSlider:SetSize(140, 16)
-overlaySizeSlider:SetPoint("LEFT", overlaySizeLabel, "RIGHT", 8, 0)
-overlaySizeSlider:SetMinMaxValues(10, 48)
-overlaySizeSlider:SetValueStep(1)
-overlaySizeSlider:SetObeyStepOnDrag(true)
-overlaySizeSlider.Low:SetText("10")
-overlaySizeSlider.High:SetText("48")
-overlaySizeSlider.Text:SetText("")
-overlaySizeSlider:SetScript("OnValueChanged", function(self, val)
-    val = math.floor(val + 0.5)
-    if PWT.db and PWT.db.pi then PWT.db.pi.overlayFontSize = val end
-    self.Text:SetText(tostring(val) .. "px")
-    PWT.PI:UpdateOverlayFont()
-end)
-
-overlayLockBtn = CreateFrame("Button", nil, overlayContent, "UIPanelButtonTemplate")
+overlayLockBtn = UI:MakeButton(overlayContent, "Unlock to Move", nil, "default")
 overlayLockBtn:SetSize(120, 24)
-overlayLockBtn:SetPoint("TOPLEFT", overlaySizeLabel, "BOTTOMLEFT", 0, -14)
-overlayLockBtn:SetText("Unlock to Move")
+overlayLockBtn:SetPoint("TOPLEFT", overlaySizeRow, "BOTTOMLEFT", 0, -10)
 overlayLockBtn:SetScript("OnClick", function()
     if not (PWT.db and PWT.db.pi and PWT.db.pi.overlayEnabled) then
         PWT:Print("Enable the overlay first.")
@@ -977,23 +810,19 @@ overlayLockBtn:SetScript("OnClick", function()
     overlayLocked = not overlayLocked
     PWT.PI:CreateOverlayWidget()
     if not overlayLocked then
-        overlayLockBtn:SetText("Lock Position")
-        overlayLockBtn:GetFontString():SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
+        overlayLockBtn.lbl:SetText("Lock Position")
+        overlayLockBtn.lbl:SetTextColor(C.textAccent[1], C.textAccent[2], C.textAccent[3])
         PWT.PI:SetOverlayMovable(true)
         PWT.PI:ShowOverlay(GetUnitName("player", false) or "Preview")
     else
-        overlayLockBtn:SetText("Unlock to Move")
-        overlayLockBtn:GetFontString():SetTextColor(1, 1, 1)
+        overlayLockBtn.lbl:SetText("Unlock to Move")
+        overlayLockBtn.lbl:SetTextColor(C.text[1], C.text[2], C.text[3])
         PWT.PI:SetOverlayMovable(false)
         PWT.PI:ForceHideOverlay()
     end
 end)
 
-local overlayPreviewBtn = CreateFrame("Button", nil, overlayContent, "UIPanelButtonTemplate")
-overlayPreviewBtn:SetSize(80, 24)
-overlayPreviewBtn:SetPoint("LEFT", overlayLockBtn, "RIGHT", 8, 0)
-overlayPreviewBtn:SetText("Preview")
-overlayPreviewBtn:SetScript("OnClick", function()
+local overlayPreviewBtn = UI:MakeButton(overlayContent, "Preview", function()
     if not (PWT.db and PWT.db.pi and PWT.db.pi.overlayEnabled) then
         PWT:Print("Enable the overlay first.")
         return
@@ -1003,110 +832,28 @@ overlayPreviewBtn:SetScript("OnClick", function()
     C_Timer.After(5, function()
         if overlayLocked then PWT.PI:ForceHideOverlay() end
     end)
-end)
-
-local function UpdateOverlayToggle()
-    if overlayCollapsed then
-        overlayArrow:SetText("|cffcc99ff+ Name Overlay|r")
-        overlayHeaderHint:SetText("click to expand")
-        overlayContent:Hide()
-    else
-        overlayArrow:SetText("|cffcc99ff- Name Overlay|r")
-        overlayHeaderHint:SetText("click to collapse")
-        overlayContent:Show()
-    end
-    if UpdateScrollHeight then UpdateScrollHeight() end
-end
-
-overlayToggleBtn:SetScript("OnClick", function()
-    overlayCollapsed = not overlayCollapsed
-    UpdateOverlayToggle()
-end)
-overlayToggleBtn:SetScript("OnEnter", function()
-    overlayArrow:SetText("|cffffffff" .. (overlayCollapsed and "+ Name Overlay" or "- Name Overlay") .. "|r")
-end)
-overlayToggleBtn:SetScript("OnLeave", function()
-    overlayArrow:SetText("|cffcc99ff" .. (overlayCollapsed and "+ Name Overlay" or "- Name Overlay") .. "|r")
-end)
+end, "default")
+overlayPreviewBtn:SetSize(80, 24)
+overlayPreviewBtn:SetPoint("LEFT", overlayLockBtn, "RIGHT", 8, 0)
 
 PI_SyncOverlay = function()
     if not PWT.db or not PWT.db.pi then return end
-    overlayEnableCheck:SetChecked(PWT.db.pi.overlayEnabled == true)
-    overlaySizeSlider:SetValue(PWT.db.pi.overlayFontSize or 24)
+    overlayEnableCheck.set(PWT.db.pi.overlayEnabled == true)
+    overlaySizeRow.set(PWT.db.pi.overlayFontSize or 24)
 end
 
-UpdateScrollHeight = function()
-    local base = listScroll:GetHeight() + 60
-    if not alertCollapsed   then base = base + alertContent:GetHeight()   + 16 end
-    base = base + 40  -- overlay separator line + toggle button
-    if not overlayCollapsed then base = base + overlayContent:GetHeight() + 8  end
-    piScrollChild:SetHeight(base)
-end
+-- Total scroll child height — all sections are always visible
+piScrollChild:SetHeight(1000)
 
--- Initialise collapsed height
-UpdateAlertToggle()
+-- ── Sync ──────────────────────────────────────────────────────────────────
 
--- Show/hide footer controls when switching tabs
-local AT_SyncOptions  -- forward declaration, defined after atonement tab is built
-
--- ── Footer controls (PI tab) ─────────────────────────────────
-local piFooterControls = CreateFrame("Frame", nil, UI.footer)
-piFooterControls:SetAllPoints(UI.footer)
-piFooterControls:Hide()
-
-local addBox = CreateFrame("EditBox", nil, piFooterControls, "InputBoxTemplate")
-addBox:SetSize(220, 24)
-addBox:SetPoint("LEFT", piFooterControls, "LEFT", PAD + 4, 0)
-addBox:SetAutoFocus(false)
-addBox:SetMaxLetters(64)
-addBox:SetScript("OnEnterPressed", function(self)
-    local name = strtrim(self:GetText())
-    if name ~= "" then
-        local m = PWT.db.piMode or "priority"
-        local l = m == "sequence" and PWT.db.piSequenceList or PWT.db.piList
-        table.insert(l, name)
-        self:SetText("")
-        RefreshList()
-        if m == "sequence" then UpdateSeqIndexLabel() end
-    end
-end)
-
-local addHint = addBox:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
-addHint:SetPoint("LEFT", addBox, "LEFT", 4, 0)
-addHint:SetText("Player name...")
-addHint:SetTextColor(C.textMuted[1], C.textMuted[2], C.textMuted[3])
-addBox:SetScript("OnTextChanged", function(self)
-    addHint:SetShown(self:GetText() == "")
-end)
-
-local addBtn = CreateFrame("Button", nil, piFooterControls, "UIPanelButtonTemplate")
-addBtn:SetSize(70, 26)
-addBtn:SetPoint("LEFT", addBox, "RIGHT", 8, 0)
-addBtn:SetText("Add")
-addBtn:SetScript("OnClick", function()
-    local name = strtrim(addBox:GetText())
-    if name ~= "" then
-        local m = PWT.db.piMode or "priority"
-        local l = m == "sequence" and PWT.db.piSequenceList or PWT.db.piList
-        table.insert(l, name)
-        addBox:SetText("")
-        RefreshList()
-        if m == "sequence" then UpdateSeqIndexLabel() end
-    end
-end)
-
--- Store footer controls on UI for show/hide by SwitchTab
-UI.piFooterControls = piFooterControls
-
--- Called by UI.SwitchTab when the PI tab becomes active
 function UI:SyncPI()
-    piFooterControls:Show()
     modePriorityBtn:Show()
     modeSequenceBtn:Show()
     seqIndexLabel:SetShown(PWT.db and PWT.db.piMode == "sequence")
     RefreshList()
     if PWT.db then
-        stickLastCheck:SetChecked(PWT.db.piSequenceStickLast or false)
+        stickLastCheck.set(PWT.db.piSequenceStickLast or false)
         PI_SyncAlerts()
         PI_SyncOverlay()
         UpdateModeButtons()
@@ -1114,7 +861,6 @@ function UI:SyncPI()
     end
 end
 
--- Allow UI:RefreshPI to call our local RefreshList
 function UI:DoRefreshPI()
     RefreshList()
     UpdateSeqIndexLabel()

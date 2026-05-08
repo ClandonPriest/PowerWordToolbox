@@ -1,16 +1,11 @@
--- ============================================================
---  Power Word: Toolbox  |  Modules/Atonement.lua
---  Atonement aura tracking and HUD widget for Disc Priests.
--- ============================================================
+-- Power Word: Toolbox | Modules/Atonement.lua
 
 local _, PWT = ...
 
 PWT.Atonement = {}
 local AT = PWT.Atonement
 
--- ============================================================
---  Constants
--- ============================================================
+-- Constants
 
 local ATONEMENT_ID = 194384
 local AT_TICK      = 0.1
@@ -24,9 +19,7 @@ local OPPOSITE = {
     BOTTOMRIGHT = "TOPLEFT",
 }
 
--- ============================================================
---  State
--- ============================================================
+-- State
 
 local atTable   = {}  -- [unitGUID] = expirationTime
 local atElapsed = 0
@@ -34,9 +27,7 @@ local atElapsed = 0
 -- Reusable buffer for expired GUIDs — avoids a per-tick allocation inside GetCountAndLowest.
 local expired = {}
 
--- ============================================================
---  Scanning
--- ============================================================
+-- Scanning
 
 local function GetGroupUnits()
     local units = {}
@@ -67,9 +58,7 @@ local function TryRegisterAura(guid, aura)
     return true
 end
 
--- ============================================================
---  Count / Expiry
--- ============================================================
+-- Count / Expiry
 
 -- Defined before ScanAll/GetCount so both can reference it directly.
 local function GetCountAndLowest()
@@ -155,9 +144,7 @@ function AT:GetCount()
     return (GetCountAndLowest())
 end
 
--- ============================================================
---  Widget
--- ============================================================
+-- Widget
 
 local widget    = CreateFrame("Frame", "PWT_AtonementWidget", UIParent)
 local widgetBg  = widget:CreateTexture(nil, "BACKGROUND")
@@ -272,9 +259,7 @@ end)
 
 widget:Hide()
 
--- ============================================================
---  Widget Management
--- ============================================================
+-- Widget Management
 
 function AT:UpdateWidget()
     if not PWT.db then return end
@@ -350,9 +335,7 @@ function AT:PrintStatus()
         "  activeCount=" .. count)
 end
 
--- ============================================================
---  Event Handlers
--- ============================================================
+-- Event Handlers
 
 function AT:OnLogin()
     self:UpdateWidget()

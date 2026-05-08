@@ -1,17 +1,11 @@
--- ============================================================
---  Power Word: Toolbox  |  Modules/PI.lua
---  Power Infusion tracking: glow, sound, whisper handling,
---  priority list and sequence modes.
--- ============================================================
+-- Power Word: Toolbox | Modules/PI.lua
 
 local _, PWT = ...
 
 PWT.PI = {}
 local PI = PWT.PI
 
--- ============================================================
---  Constants
--- ============================================================
+-- Constants
 
 local PI_SPELL_ID        = 10060
 local PI_COOLDOWN_SECS   = 120
@@ -29,22 +23,32 @@ local PI_SOUNDS = {
 }
 PI.PI_SOUNDS = PI_SOUNDS  -- expose for Options
 
--- ============================================================
---  State
--- ============================================================
+-- State
 
 local activeGlows    = {}
 local activeRequests = {}
 local soundList      = {}
 local piLastCastTime = 0
 
+local earlyCountdownTicker = nil
+local earlyCountdownTarget = nil
+
+local overlayWidget  = nil
+local overlayMovable = false
+
+local function CancelEarlyCountdown()
+    if earlyCountdownTicker then
+        earlyCountdownTicker:Cancel()
+        earlyCountdownTicker = nil
+    end
+    earlyCountdownTarget = nil
+end
+
 PI.sequenceIndex  = 1
 PI.sequenceFired  = false
 PI.soundList      = soundList  -- shared reference for Options
 
--- ============================================================
---  Sound List
--- ============================================================
+-- Sound List
 
 function PI:BuildSoundList()
     wipe(soundList)
@@ -87,9 +91,7 @@ function PI:PlayCurrentSound()
     C_Timer.After(0.5, function() SetCVar("Sound_SFXVolume", prev) end)
 end
 
--- ============================================================
---  Glow
--- ============================================================
+-- Glow
 
 function PI:ApplyGlow(frame, playerName)
     if not frame then return end
@@ -242,6 +244,7 @@ function PI:ClearGlow(playerName)
 end
 
 function PI:ClearAllGlows()
+    CancelEarlyCountdown()
     local count = 0
     for name, glow in pairs(activeGlows) do
         glow:SetScript("OnUpdate", nil)
@@ -256,9 +259,32 @@ function PI:ClearAllGlows()
     end
 end
 
--- ============================================================
---  Cooldown Tracking
--- ============================================================
+-- Starts a ticker that updates the overlay text with a live countdown until
+-- piEndTime, then switches to the normal "Give [name] PI" text.
+function PI:StartEarlyCountdown(name, piEndTime)
+    CancelEarlyCountdown()
+    earlyCountdownTarget = name
+    earlyCountdownTicker = C_Timer.NewTicker(0.1, function()
+        if not earlyCountdownTarget then return end
+        if not (overlayWidget and overlayWidget:IsShown()) then return end
+        local remaining = piEndTime - GetTime()
+        if remaining <= 0 then
+            CancelEarlyCountdown()
+            overlayWidget.nameText:SetText("Give " .. name .. " PI")
+        else
+            overlayWidget.nameText:SetText("Give " .. name .. " PI in " .. math.ceil(remaining) .. "s")
+        end
+    end)
+    -- Set the initial text immediately rather than waiting for the first tick.
+    if overlayWidget and overlayWidget:IsShown() then
+        local remaining = piEndTime - GetTime()
+        if remaining > 0 then
+            overlayWidget.nameText:SetText("Give " .. name .. " PI in " .. math.ceil(remaining) .. "s")
+        end
+    end
+end
+
+-- Cooldown Tracking
 
 function PI:IsReady()
     if piLastCastTime == 0 then return true end
@@ -300,9 +326,7 @@ function PI:PrintStatus()
         "  sound="    .. tostring(PWT.db.pi.soundEnabled))
 end
 
--- ============================================================
---  Sequence
--- ============================================================
+-- Sequence
 
 function PI:ResetSequence()
     self.sequenceIndex = 1
@@ -313,9 +337,7 @@ function PI:ResetSequence()
     end
 end
 
--- ============================================================
---  Player / Group Lookup
--- ============================================================
+-- Player / Group Lookup
 
 local function StripRealm(n)
     if not n then return nil end
@@ -338,9 +360,7 @@ local function IsPlayerInGroup(name)
     return false, nil
 end
 
--- ============================================================
---  Whisper Handler
--- ============================================================
+-- Whisper Handler
 
 function PI:OnWhisper()
     if not InCombatLockdown() then
@@ -351,9 +371,28 @@ function PI:OnWhisper()
         PWT:Debug("Whisper ignored (PI feature disabled).", "pi")
         return
     end
+    local isEarly        = false
+    local earlyRemaining = 0
+
     if not self:IsReady() then
-        PWT:Debug("Whisper ignored (PI on cooldown).", "pi")
-        return
+        local cfg = PWT.db.pi
+        if cfg.earlyRequestEnabled then
+            local remaining = piLastCastTime > 0
+                and (PI_COOLDOWN_SECS - (GetTime() - piLastCastTime))
+                or  0
+            local window = cfg.earlyRequestWindow or 5
+            if remaining > 0 and remaining <= window then
+                isEarly        = true
+                earlyRemaining = remaining
+                PWT:Debug(string.format("Early PI request: %.1fs remaining (window %.0fs).", remaining, window), "pi")
+            else
+                PWT:Debug(string.format("Whisper ignored (PI on cooldown, %.1fs remaining).", remaining), "pi")
+                return
+            end
+        else
+            PWT:Debug("Whisper ignored (PI on cooldown).", "pi")
+            return
+        end
     end
 
     local mode = PWT.db.piMode or "priority"
@@ -387,7 +426,12 @@ function PI:OnWhisper()
             local raidFrame = PWT.RaidFrames:Find(unitToken)
             if raidFrame then
                 self:ApplyGlow(raidFrame, name)
-                PWT:Print("|cffFFD700PI Seq [" .. idx .. "/" .. #seq .. "]: " .. name .. "|r")
+                if isEarly then
+                    self:StartEarlyCountdown(name, piLastCastTime + PI_COOLDOWN_SECS)
+                    PWT:Print(string.format("|cffFFD700PI Seq [%d/%d]: %s (in %ds)|r", idx, #seq, name, math.ceil(earlyRemaining)))
+                else
+                    PWT:Print("|cffFFD700PI Seq [" .. idx .. "/" .. #seq .. "]: " .. name .. "|r")
+                end
             else
                 PWT:Debug("Sequence: in group but no raid frame for: " .. name, "pi")
             end
@@ -407,7 +451,12 @@ function PI:OnWhisper()
                 local raidFrame = PWT.RaidFrames:Find(unitToken)
                 if raidFrame then
                     self:ApplyGlow(raidFrame, name)
-                    PWT:Print("|cffFFD700PI: " .. name .. "|r")
+                    if isEarly then
+                        self:StartEarlyCountdown(name, piLastCastTime + PI_COOLDOWN_SECS)
+                        PWT:Print(string.format("|cffFFD700PI: %s (in %ds)|r", name, math.ceil(earlyRemaining)))
+                    else
+                        PWT:Print("|cffFFD700PI: " .. name .. "|r")
+                    end
                 else
                     PWT:Debug("In group but no raid frame for: " .. name, "pi")
                 end
@@ -418,9 +467,7 @@ function PI:OnWhisper()
     end
 end
 
--- ============================================================
---  Event Handlers
--- ============================================================
+-- Event Handlers
 
 function PI:OnLogin()
     self:BuildSoundList()
@@ -440,18 +487,13 @@ function PI:OnLeaveCombat()
     PWT:Debug("Left combat, cleared all glows.", "pi")
 end
 
--- ============================================================
---  Name Overlay Widget
--- ============================================================
-
-local overlayWidget = nil
-local overlayMovable = false
+-- Name Overlay Widget
 
 function PI:CreateOverlayWidget()
     if overlayWidget then return end
 
     local f = CreateFrame("Frame", "PWT_PIOverlay", UIParent)
-    f:SetSize(280, 60)
+    f:SetSize(360, 60)
     f:SetFrameStrata("HIGH")
     f:SetClampedToScreen(true)
     f:SetMovable(true)

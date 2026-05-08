@@ -1,24 +1,14 @@
--- ============================================================
---  Power Word: Toolbox  |  Modules/VoidShieldDeck.lua
---  Void Shield deck tracker for Discipline Priests.
---
---  Deck mechanic: 3 cards (2 no-proc + 1 proc).
---  Each Penance cast draws one card.
---    Chance = 1/cardsRemaining  while proc card is still in deck.
---    Chance = 0%                after the proc card is drawn.
---  Deck resets when empty, on raid encounter start, or M+ start.
---
---  Proc detection: monitor the action bar slot that holds
---  Power Word: Shield.  When its texture changes to the Void
---  Shield icon the proc fired; the slot reverts when consumed.
--- ============================================================
+-- Power Word: Toolbox | Modules/VoidShieldDeck.lua
+-- Void Shield 3-card deck tracker. Deck = 2 no-proc + 1 proc card.
+-- Each Penance cast draws one card; chance = 1/cardsRemaining while proc is in deck.
+-- Proc detected by monitoring the PWS action slot texture for the Void Shield icon.
 
 local _, PWT = ...
 
 PWT.VoidShieldDeck = {}
 local VSD = PWT.VoidShieldDeck
 
--- ── Constants ────────────────────────────────────────────────
+-- Constants
 local PENANCE_SPELL_ID   = 47540
 local PWS_SPELL_ID       = 17
 local PWS_PROC_SPELL_ID  = 1253593
@@ -28,9 +18,10 @@ local MAX_CARDS          = 3
 local OUTCOME_TIMEOUT    = 0.25      -- seconds to wait before assuming no-proc
 local PROC_ALERT_TIMEOUT = 6         -- seconds before proc icon alert auto-dismisses
 local CAST_HISTORY_MAX   = 4         -- rolling history depth for desync detection
--- Standard action bars: main (1-12) + 4 multi-bars (13-60) + two extra rows (61-72).
--- Slots 73-180 cover vehicle/override bars that will never hold PWS.
-local PWS_SLOT_SCAN_MAX  = 72
+-- WoW provides 180 action slots total. Slots 1-72 cover Blizzard's default bars;
+-- slots 73-180 are used by action bar addons (Bartender4, Dominos, ElvUI, etc.)
+-- and must be included so FindPWSSlot works regardless of which bar addon is in use.
+local PWS_SLOT_SCAN_MAX  = 180
 
 local VSD_SOUNDS = {
     { label = "Raid Warning",       id = SOUNDKIT.RAID_WARNING },
@@ -52,18 +43,14 @@ local ACTION_BAR_PREFIXES = {
     "MultiActionBar4Button",
 }
 
--- ── Deck State ───────────────────────────────────────────────
+-- Deck State
 VSD.cardsRemaining  = MAX_CARDS
 VSD.procAvailable   = true   -- proc card is still in the deck
 VSD.awaitingOutcome = false  -- true while waiting to detect this cast's result
 VSD.pendingCastID   = 0
 VSD.widgetVisible   = false  -- true while the module is actively displayed
 
--- ── Widget handles (all created lazily in BuildWidget) ───────
--- Three independent draggable frames:
---   chanceWidget – "Chance: X%"
---   deckWidget   – "Deck: X / 3"
---   cardsWidget  – colored card slots
+-- Widget handles (created lazily in BuildWidget)
 local chanceWidget = nil
 local deckWidget   = nil
 local cardsWidget  = nil
@@ -77,36 +64,29 @@ local cardTextures = {}
 local pendingTimer = nil
 local pwsSlot      = nil   -- action-bar slot that holds PWS / Void Shield
 
--- ── Cast history ring buffer ──────────────────────────────────
--- Rolling history of the last CAST_HISTORY_MAX outcomes (true=proc, false=no-proc).
--- Stored as a fixed-size ring buffer to avoid O(n) table.remove shifts.
--- Survives natural deck resets; cleared on login / encounter / challenge resets.
+-- Cast history ring buffer (CAST_HISTORY_MAX slots, O(1) insert).
+-- Survives natural deck resets; cleared on login/encounter/challenge resets.
 local castHistory     = {}   -- ring buffer slots 1..CAST_HISTORY_MAX
 local castHistoryHead = 0    -- index of most recently written slot (0 = empty)
 local castHistorySize = 0    -- number of valid entries currently in the buffer
 
--- Returns the entry at the given offset from the most recent (0 = newest, 1 = second newest…).
--- Returns nil if offset is out of range.
 local function GetHistoryEntry(offset)
     if offset >= castHistorySize then return nil end
     local idx = ((castHistoryHead - 1 - offset) % CAST_HISTORY_MAX) + 1
     return castHistory[idx]
 end
 
--- Resets the ring buffer. Use instead of bare wipe(castHistory) everywhere.
 local function WipeCastHistory()
     wipe(castHistory)
     castHistoryHead = 0
     castHistorySize = 0
 end
 
--- ── Sound list (built once on login, shared with Options) ─────
+-- Sound list (built once on login, shared with Options)
 local soundList = {}
 VSD.soundList   = soundList
 
--- ── Button frame cache (built once on login) ──────────────────
--- Caches direct references to action button frames at login so that
--- ScanButtonFrames never needs _G string lookups at runtime.
+-- Button frame cache (built once at login; avoids _G lookups at runtime)
 local cachedButtonFrames = {}
 
 local function BuildButtonFrameCache()
@@ -121,21 +101,19 @@ local function BuildButtonFrameCache()
     end
 end
 
--- ── Proc alert widget (created lazily in BuildProcAlert) ──────
+-- Proc alert widget (created lazily in BuildProcAlert)
 local procAlertWidget  = nil
 local procAlertBg      = nil
 local procAlertTimer   = nil
 VSD.procAlertActive    = false
 VSD.procAlertPreview   = false  -- true while showing the positioning preview
 
--- ── PWS missing warning popup ─────────────────────────────────
+-- PWS missing warning popup
 local pwsWarningWidget = nil
 local pwsWarningTimer  = nil
 local PWS_WARN_TIMEOUT = 8
 
--- ─────────────────────────────────────────────────────────────
---  Internal helpers
--- ─────────────────────────────────────────────────────────────
+-- Internal helpers
 
 local function ClampFontSize(size)
     return math.max(10, math.min(40, size or 18))
@@ -145,9 +123,6 @@ local function FormatChance(value)
     return string.format("%d%%", math.floor((value or 0) + 0.5))
 end
 
--- Scan cached button frame references for the PWS or Void Shield texture.
--- Used as a fallback when GetActionInfo fails to locate the slot.
--- References are pre-resolved at login — no _G lookups at runtime.
 local function ScanButtonFrames()
     for _, btn in ipairs(cachedButtonFrames) do
         local tex = btn.icon:GetTexture()
@@ -183,9 +158,7 @@ local function IsProcTextureActive()
     return (tex == PROC_TEXTURE_ID)
 end
 
--- ─────────────────────────────────────────────────────────────
---  Deck logic
--- ─────────────────────────────────────────────────────────────
+-- Deck logic
 
 function VSD:GetChance()
     if not self.procAvailable then return 0 end
@@ -208,44 +181,16 @@ function VSD:ResetDeck(reason)
     self:RefreshWidget()
 end
 
--- Record one outcome into the ring buffer — O(1), no table shifting.
 local function RecordOutcome(didProc)
     castHistoryHead = (castHistoryHead % CAST_HISTORY_MAX) + 1
     castHistory[castHistoryHead] = didProc
     if castHistorySize < CAST_HISTORY_MAX then castHistorySize = castHistorySize + 1 end
 end
 
--- Check whether the two cross-deck resync scenarios are present in history and,
--- if the current deck state contradicts what those scenarios imply, correct it.
---
--- Scenario A – back-to-back procs:
---   Only possible as the LAST draw of deck N (proc) followed by the FIRST draw
---   of deck N+1 (proc).  After both casts the state must be:
---   cardsRemaining=2, procAvailable=false.
---
--- Scenario B – four consecutive no-procs:
---   Only possible as the last TWO draws of deck N (proc was position 1, leaving
---   two red cards) followed by the first TWO draws of deck N+1 (proc is
---   position 3).  After all four casts the state must be:
---   cardsRemaining=1, procAvailable=true.
+-- Detects a desync pattern and corrects state if needed:
+--   4 no-procs in a row: last four outcomes all no-proc → cardsRemaining=1, procAvailable=true
 function VSD:CheckDesync()
-    if not (PWT.db and PWT.db.voidShieldDeck and PWT.db.voidShieldDeck.patternResync) then return end
-
-    -- Scenario A: last two outcomes are both proc.
-    if castHistorySize >= 2 and GetHistoryEntry(0) == true and GetHistoryEntry(1) == true then
-        local expRemaining, expProc = 2, false
-        PWT:Print("Void Shield: back-to-back proc pattern detected – fixing deck to correct state.")
-        if self.cardsRemaining ~= expRemaining or self.procAvailable ~= expProc then
-            self.cardsRemaining = expRemaining
-            self.procAvailable  = expProc
-            self:RefreshWidget()
-            PWT:Print("Void Shield deck resynced: corrected to "
-                .. expRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
-        end
-        return
-    end
-
-    -- Scenario B: last four outcomes are all no-proc.
+    -- 4 consecutive no-procs: proc card must still be in the deck.
     if castHistorySize >= 4
         and GetHistoryEntry(0) == false and GetHistoryEntry(1) == false
         and GetHistoryEntry(2) == false and GetHistoryEntry(3) == false
@@ -261,6 +206,16 @@ function VSD:CheckDesync()
         end
         return
     end
+end
+
+local function PrintCastHistory()
+    if not (PWT.db and PWT.db.debug) then return end
+    if castHistorySize == 0 then return end
+    local parts = {}
+    for i = castHistorySize - 1, 0, -1 do
+        parts[castHistorySize - i] = GetHistoryEntry(i) and "P" or "N"
+    end
+    PWT:Debug("Void Shield cast history (oldest→newest): [" .. table.concat(parts, ", ") .. "]", "voidshield")
 end
 
 function VSD:ApplyCastResult(didProc)
@@ -283,21 +238,18 @@ function VSD:ApplyCastResult(didProc)
 
     -- Record the outcome AFTER state is updated so CheckDesync sees current values.
     RecordOutcome(didProc)
-
-    -- Debug history display: only build the string when debug is actually on.
-    if PWT.db and PWT.db.debug then
-        local parts = {}
-        for i = castHistorySize - 1, 0, -1 do
-            parts[castHistorySize - i] = GetHistoryEntry(i) and "P" or "N"
-        end
-        PWT:Debug("Void Shield cast history: [" .. table.concat(parts, ", ") .. "]", "voidshield")
-    end
+    PrintCastHistory()
 
     if self.cardsRemaining == 0 then
         -- Check patterns before resetting — history still contains this outcome.
         self:CheckDesync()
-        -- Deck exhausted naturally; history is preserved across the reset.
-        self:ResetDeck("deck empty")
+        -- Only reset if CheckDesync didn't correct the state to a non-zero count.
+        -- If it did correct it, the deck is mid-run and should not be reset.
+        if self.cardsRemaining == 0 then
+            self:ResetDeck("deck empty")
+        else
+            self:RefreshWidget()
+        end
     else
         self:CheckDesync()
         self:RefreshWidget()
@@ -315,6 +267,7 @@ function VSD:OnPenanceCast()
     if not self.procAvailable then
         self.cardsRemaining = math.max(0, self.cardsRemaining - 1)
         RecordOutcome(false)
+        PrintCastHistory()
         if self.cardsRemaining == 0 then
             self:ResetDeck("deck empty")
         else
@@ -348,18 +301,30 @@ function VSD:OnPenanceCast()
     end)
 end
 
--- ─────────────────────────────────────────────────────────────
---  Widget
--- ─────────────────────────────────────────────────────────────
+-- Widget
 
-local CARD_COLORS = {
-    {0.80, 0.15, 0.15, 1.0},  -- slot 1: red  (no-proc)
-    {0.80, 0.15, 0.15, 1.0},  -- slot 2: red  (no-proc)
-    {0.15, 0.75, 0.25, 1.0},  -- slot 3: green (proc)
+local DEFAULT_CARD_COLORS = {
+    proc    = {0.15, 0.75, 0.25, 1.0},
+    noProc  = {0.80, 0.15, 0.15, 1.0},
+    unknown = {0.55, 0.52, 0.60, 1.0},
 }
 
--- Creates a minimal draggable frame that saves its position to the given db keys.
--- Starts locked (movable=false, mouse=false, bg transparent).
+function VSD:GetCardColor(kind)
+    local cfg = PWT.db and PWT.db.voidShieldDeck
+    local key = kind == "proc" and "cardProcColor"
+        or kind == "unknown" and "cardUnknownColor"
+        or "cardNoProcColor"
+    local fallback = DEFAULT_CARD_COLORS[kind] or DEFAULT_CARD_COLORS.noProc
+    local col = cfg and cfg[key] or fallback
+    return col[1] or fallback[1], col[2] or fallback[2], col[3] or fallback[3], col[4] or fallback[4] or 1.0
+end
+
+local function ApplyCardColors()
+    if cardTextures[1] then cardTextures[1]:SetColorTexture(VSD:GetCardColor("noProc")) end
+    if cardTextures[2] then cardTextures[2]:SetColorTexture(VSD:GetCardColor("noProc")) end
+    if cardTextures[3] then cardTextures[3]:SetColorTexture(VSD:GetCardColor("proc")) end
+end
+
 local function MakeSubWidget(frameName, posXKey, posYKey)
     local f = CreateFrame("Frame", frameName, UIParent)
     f:SetFrameStrata("MEDIUM")
@@ -392,8 +357,6 @@ local function MakeSubWidget(frameName, posXKey, posYKey)
     return f, bg
 end
 
--- Builds all three frames on first call; no-op afterwards.
--- Must only be called after PLAYER_LOGIN (PWT.db must exist).
 function VSD:BuildWidget()
     if chanceWidget then return end
 
@@ -415,19 +378,17 @@ function VSD:BuildWidget()
     for i = 1, MAX_CARDS do
         local card = cardsWidget:CreateTexture(nil, "OVERLAY")
         card:SetSize(28, 18)
-        local col = CARD_COLORS[i]
-        card:SetColorTexture(col[1], col[2], col[3], col[4])
         card:SetPoint("LEFT", cardsWidget, "LEFT", (i - 1) * 34, 2)
         cardTextures[i] = card
     end
+    ApplyCardColors()
 
     chanceWidget:Hide()
     deckWidget:Hide()
     cardsWidget:Hide()
 end
 
--- Full layout update — called when settings change (font, size, position, strata, orientation).
--- Also called from ShowWidget on first display. Expensive; do not call on every cast.
+-- Full layout update (font, size, position, strata, orientation). Expensive; not called per-cast.
 function VSD:UpdateWidget()
     if not chanceWidget then return end
     if not PWT.db or not PWT.db.voidShieldDeck then return end
@@ -439,6 +400,7 @@ function VSD:UpdateWidget()
     local cardsSize     = math.max(8, math.min(48, cfg.cardsSize or 18))
     local cardW         = math.floor(cardsSize * 1.56 + 0.5)
     local cardSpacing   = cardW + 6   -- card width + 6px gap between cards
+    ApplyCardColors()
 
     -- Reposition each frame from saved db values.
     local function positionWidget(f, posXKey, posYKey, defaultX, defaultY)
@@ -501,7 +463,7 @@ function VSD:UpdateWidget()
     cardsWidget:SetShown(on and cfg.showCards ~= false)
 
     -- Card slot visuals.
-    -- Slots 1 & 2 = red no-proc cards, slot 3 = green proc card.
+    -- Slots 1 & 2 = no-proc cards, slot 3 = proc card.
     local remainingRed = self.procAvailable
         and math.max(0, cards - 1)
         or  cards
@@ -513,9 +475,7 @@ function VSD:UpdateWidget()
     end
 end
 
--- Lightweight data refresh — only updates label text, widget sizes, and card visibility.
--- Called on every cast result. Skips font, position, strata, and card geometry updates
--- since those only change when settings change.
+-- Lightweight per-cast refresh — updates labels, sizes, and card visibility only.
 function VSD:RefreshWidget()
     if not chanceWidget then return end
     if not PWT.db or not PWT.db.voidShieldDeck then return end
@@ -523,6 +483,7 @@ function VSD:RefreshWidget()
 
     local chanceFontSz = ClampFontSize(cfg.chanceFontSize)
     local deckFontSz   = ClampFontSize(cfg.deckFontSize)
+    ApplyCardColors()
 
     -- Chance label text + resize to fit new text.
     local chanceVal = FormatChance(self:GetChance())
@@ -599,9 +560,7 @@ function VSD:ResetPosition()
     if cardsWidget  then cardsWidget:ClearAllPoints();  cardsWidget:SetPoint("CENTER",  UIParent, "CENTER", 0, 105) end
 end
 
--- ─────────────────────────────────────────────────────────────
---  Proc Alert  (icon + sound on proc detection)
--- ─────────────────────────────────────────────────────────────
+-- Proc Alert
 
 function VSD:BuildSoundList()
     wipe(soundList)
@@ -634,8 +593,7 @@ function VSD:PlayProcSound()
     local vol  = cfg.procSoundVolume  or 1.0
     local chan  = cfg.procSoundChannel or "SFX"
 
-    -- Only touch Sound_SFXVolume if the desired volume differs from the current value.
-    -- SetCVar is expensive and spawns a timer closure — skip it when volume is unchanged.
+    -- SetCVar is expensive; skip if volume is already at the desired level.
     local prev = GetCVar("Sound_SFXVolume")
     local needsVolChange = math.abs((tonumber(prev) or 1.0) - vol) > 0.001
     if needsVolChange then SetCVar("Sound_SFXVolume", tostring(vol)) end
@@ -652,7 +610,6 @@ function VSD:PlayProcSound()
     end
 end
 
--- Lazily creates the proc alert frame (the icon that flashes on proc).
 function VSD:BuildProcAlert()
     if procAlertWidget then return end
     if not PWT.db or not PWT.db.voidShieldDeck then return end
@@ -709,7 +666,6 @@ local function ApplyProcAlertAppearance()
         cfg.procAlertPosX or 0, cfg.procAlertPosY or 100)
 end
 
--- Show the proc alert (real proc fired — starts the auto-dismiss timer).
 function VSD:ShowProcAlert()
     self:BuildProcAlert()
     if not procAlertWidget then return end
@@ -723,7 +679,7 @@ function VSD:ShowProcAlert()
     end)
 end
 
--- Show a non-timed preview so the user can position the frame from options.
+-- Non-timed preview for positioning from options; doesn't set procAlertActive.
 function VSD:ShowProcAlertPreview()
     self:BuildProcAlert()
     if not procAlertWidget then return end
@@ -733,7 +689,6 @@ function VSD:ShowProcAlertPreview()
     -- Don't start the timer or set procAlertActive — this is positioning only.
 end
 
--- Hide the proc alert preview without touching a real active alert.
 function VSD:HideProcAlertPreview()
     if self.procAlertActive then return end  -- real alert is showing; leave it
     self.procAlertPreview = false
@@ -773,9 +728,7 @@ function VSD:ResetProcAlertPosition()
     end
 end
 
--- ─────────────────────────────────────────────────────────────
---  PWS Missing Warning
--- ─────────────────────────────────────────────────────────────
+-- PWS Missing Warning
 
 local function BuildPWSWarning()
     if pwsWarningWidget then return end
@@ -792,7 +745,6 @@ local function BuildPWSWarning()
     icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
     icon:SetTexture("Interface\\Icons\\Spell_Holy_PowerWordShield")
 
-    -- "GameFontNormalLarge" gives a safe fallback font so text renders even if SetFont fails.
     local label = pwsWarningWidget:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     label:SetPoint("LEFT",  pwsWarningWidget, "LEFT", 52, 0)
     label:SetPoint("RIGHT", pwsWarningWidget, "RIGHT", 0, 0)
@@ -830,9 +782,7 @@ function VSD:HidePWSWarning()
     if pwsWarningWidget then pwsWarningWidget:Hide() end
 end
 
--- ─────────────────────────────────────────────────────────────
---  Public API  (called from Core/Init.lua event dispatch)
--- ─────────────────────────────────────────────────────────────
+-- Public API
 
 function VSD:OnSpellCast(unit, spellID)
     if unit ~= "player" then return end
@@ -851,23 +801,18 @@ function VSD:OnSpellCast(unit, spellID)
     C_Timer.After(0.05, function() self:CheckForProc() end)
 end
 
--- Write current deck state to SavedVariables before the session ends.
--- Only meaningful for /reload — a DC never reaches this path.
+-- Writes deck state to SavedVariables. Only reached on /reload, not DC.
 function VSD:SaveState()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
     vs.savedCardsRemaining = self.cardsRemaining
     vs.savedProcAvailable  = self.procAvailable
-    -- Deep-copy history in insertion order (oldest first) so RestoreState
-    -- can replay it through RecordOutcome to rebuild the ring buffer correctly.
     vs.savedCastHistory = {}
     for i = castHistorySize - 1, 0, -1 do
         vs.savedCastHistory[castHistorySize - i] = GetHistoryEntry(i)
     end
 end
 
--- Restore deck state that was written by SaveState on the previous session.
--- Clears the saved fields afterwards so they are not reused on a real login.
 function VSD:RestoreState()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
@@ -887,8 +832,6 @@ function VSD:RestoreState()
         .. self.cardsRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
 end
 
--- Called from PLAYER_ENTERING_WORLD.  isReload is true for /reload, false for
--- a fresh login.  On reload we restore saved state; on login we reset normally.
 function VSD:OnEnteringWorld(isReload)
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
@@ -902,11 +845,9 @@ end
 function VSD:OnLogin()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
 
-    -- Build once at login — sound list and button frame cache are reused for the session.
     self:BuildSoundList()
     BuildButtonFrameCache()
 
-    -- If RestoreState already ran this session (reload path), skip the reset.
     if PWT.db.voidShieldDeck.savedCardsRemaining == nil
        and self.cardsRemaining ~= MAX_CARDS then
         -- State was already restored by OnEnteringWorld; just find the slot and show.
@@ -929,7 +870,7 @@ end
 
 function VSD:OnEncounterStart()
     if not PWT.db or not PWT.db.voidShieldDeck or not PWT.db.voidShieldDeck.enabled then return end
-    -- ENCOUNTER_START fires for every boss including M+ bosses.
+    -- ENCOUNTER_START fires for every Raid boss
     -- Only reset for raid encounters; M+ runs are handled by OnChallengeModeStart.
     local _, instanceType = GetInstanceInfo()
     if instanceType ~= "raid" then return end
@@ -939,8 +880,18 @@ end
 
 function VSD:OnChallengeModeStart()
     if not PWT.db or not PWT.db.voidShieldDeck or not PWT.db.voidShieldDeck.enabled then return end
-    self:ResetDeck("Mythic+ start")
+    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
+       and not C_ChallengeMode.IsChallengeModeActive() then
+        return
+    end
+    self:ResetDeck("Mythic+ timer start")
     pwsSlot = FindPWSSlot()
+end
+
+function VSD:OnChallengeModeArmed()
+    -- CHALLENGE_MODE_START fires when the key is activated and the 10 second
+    -- waiting-room countdown begins. Void Shield resets when the timer starts,
+    -- handled by WORLD_STATE_TIMER_START.
 end
 
 function VSD:PrintStatus()

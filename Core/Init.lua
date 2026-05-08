@@ -1,13 +1,8 @@
--- ============================================================
---  Power Word: Toolbox  |  Core/Init.lua
---  Namespace, defaults, utilities, event dispatch, slash cmds
--- ============================================================
+-- Power Word: Toolbox | Core/Init.lua
 
 local ADDON_NAME, PWT = ...
 
--- ============================================================
---  Saved Variable Defaults
--- ============================================================
+-- Saved Variable Defaults
 
 PWT.defaults = {
     piEnabled           = false,
@@ -33,10 +28,12 @@ PWT.defaults = {
         soundIndex      = 5,
         soundVolume     = 1.0,
         soundChannel    = "SFX",
-        overlayEnabled  = false,
-        overlayPosX     = nil,
-        overlayPosY     = nil,
-        overlayFontSize = 24,
+        overlayEnabled       = false,
+        overlayPosX          = nil,
+        overlayPosY          = nil,
+        overlayFontSize      = 24,
+        earlyRequestEnabled  = true,
+        earlyRequestWindow   = 5,
     },
     radiance = {
         enabled     = false,
@@ -58,7 +55,6 @@ PWT.defaults = {
         cardsPosX      = nil,
         cardsPosY      = nil,
         showCards        = true,
-        patternResync    = false,
         cardsRotated     = false,
         showChance       = true,
         showDeck         = true,
@@ -70,6 +66,9 @@ PWT.defaults = {
         chanceStrata     = "MEDIUM",
         deckStrata       = "MEDIUM",
         cardsStrata      = "MEDIUM",
+        cardProcColor    = {0.15, 0.75, 0.25},
+        cardNoProcColor  = {0.80, 0.15, 0.15},
+        cardUnknownColor = {0.55, 0.52, 0.60},
         -- Proc icon alert
         procAlertEnabled = false,
         procAlertPosX    = nil,
@@ -97,27 +96,9 @@ PWT.defaults = {
         mouseFollow   = false,
         mouseAnchor   = "TOPLEFT",
     },
-    utilityReminders = {
-        enabled    = true,
-        alertPosX  = nil,
-        alertPosY  = nil,
-        alertSize  = 18,
-        checks  = {
-            magisters         = { shackle = true,  purify = false, phantasm = false },
-            maisara           = { shackle = true,  purify = true,  phantasm = false },
-            nexuspoint        = { shackle = false, purify = false, phantasm = true  },
-            windrunner        = { shackle = true,  purify = false, phantasm = false },
-            algethaar         = { shackle = false, purify = false, phantasm = false },
-            seatoftriumvirate = { shackle = true,  purify = false, phantasm = true  },
-            skyreach          = { shackle = false, purify = false, phantasm = false },
-            pitofsaron        = { shackle = true,  purify = true,  phantasm = true  },
-        },
-    },
 }
 
--- ============================================================
---  Utility
--- ============================================================
+-- Utility
 
 function PWT:Print(msg)
     if PWT.db and PWT.db.showChatMessages == false then return end
@@ -133,9 +114,7 @@ function PWT:Debug(msg, module)
     print("|cffaaaaaa[PWT Debug" .. (module and ":" .. module or "") .. "]|r " .. tostring(msg))
 end
 
--- ============================================================
---  Class / Spec Detection
--- ============================================================
+-- Class / Spec Detection
 
 PWT.isPriest = false
 PWT.isDisc   = false
@@ -160,9 +139,7 @@ function PWT:CheckSpec()
     if not self.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:HideWidget() end
 end
 
--- ============================================================
---  Saved Variable Migration
--- ============================================================
+-- Saved Variable Migration
 
 local function MigrateDB()
     local db = PowerWordToolboxDB
@@ -196,8 +173,10 @@ local function MigrateDB()
         if pi.soundIndex      == nil then pi.soundIndex      = 5 end
         if pi.soundVolume     == nil then pi.soundVolume     = 1.0 end
         if pi.soundChannel    == nil then pi.soundChannel    = "SFX" end
-        if pi.overlayEnabled  == nil then pi.overlayEnabled  = false end
-        if pi.overlayFontSize == nil then pi.overlayFontSize = 24 end
+        if pi.overlayEnabled      == nil then pi.overlayEnabled      = false end
+        if pi.overlayFontSize     == nil then pi.overlayFontSize     = 24    end
+        if pi.earlyRequestEnabled == nil then pi.earlyRequestEnabled = true end
+        if pi.earlyRequestWindow  == nil then pi.earlyRequestWindow  = 5     end
     end
 
     if not db.radiance then
@@ -219,8 +198,8 @@ local function MigrateDB()
     else
         local vs = db.voidShieldDeck
         if vs.enabled    == nil then vs.enabled    = false end
+        vs.patternResync = nil  -- baked in, no longer a user setting
         if vs.showCards       == nil then vs.showCards       = true  end
-        if vs.patternResync   == nil then vs.patternResync   = false end
         if vs.cardsRotated    == nil then vs.cardsRotated    = false end
         if vs.showChance      == nil then vs.showChance      = true end
         if vs.showDeck        == nil then vs.showDeck        = true end
@@ -234,6 +213,9 @@ local function MigrateDB()
         if vs.chanceStrata     == nil then vs.chanceStrata     = "MEDIUM" end
         if vs.deckStrata       == nil then vs.deckStrata       = "MEDIUM" end
         if vs.cardsStrata      == nil then vs.cardsStrata      = "MEDIUM" end
+        if vs.cardProcColor    == nil then vs.cardProcColor    = {0.15, 0.75, 0.25} end
+        if vs.cardNoProcColor  == nil then vs.cardNoProcColor  = {0.80, 0.15, 0.15} end
+        if vs.cardUnknownColor == nil then vs.cardUnknownColor = {0.55, 0.52, 0.60} end
         if vs.procAlertEnabled == nil then vs.procAlertEnabled = false    end
         if vs.procAlertSize    == nil then vs.procAlertSize    = 64       end
         if vs.procAlertStrata  == nil then vs.procAlertStrata  = "HIGH"   end
@@ -261,35 +243,9 @@ local function MigrateDB()
         if at.mouseAnchor   == nil then at.mouseAnchor   = "TOPLEFT" end
     end
 
-    if not db.utilityReminders then
-        db.utilityReminders = CopyTable(PWT.defaults.utilityReminders)
-    else
-        local ur = db.utilityReminders
-        if ur.enabled   == nil then ur.enabled   = true end
-        if ur.alertSize == nil then ur.alertSize  = 18   end
-        ur.alertWidth = nil  -- removed in favour of alertSize
-        -- Clamp in case a saved value predates the 10-100 range
-        if ur.alertSize then ur.alertSize = math.max(10, math.min(100, ur.alertSize)) end
-        if not ur.checks then ur.checks = CopyTable(PWT.defaults.utilityReminders.checks) end
-        -- Ensure every dungeon/spell entry exists (handles new additions in future patches)
-        local defChecks = PWT.defaults.utilityReminders.checks
-        for dkey, defDung in pairs(defChecks) do
-            if not ur.checks[dkey] then
-                ur.checks[dkey] = CopyTable(defDung)
-            else
-                for skey, defVal in pairs(defDung) do
-                    if ur.checks[dkey][skey] == nil then
-                        ur.checks[dkey][skey] = defVal
-                    end
-                end
-            end
-        end
-    end
 end
 
--- ============================================================
---  Event Dispatch
--- ============================================================
+-- Event Dispatch
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
@@ -305,6 +261,7 @@ frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 frame:RegisterEvent("ENCOUNTER_START")
 frame:RegisterEvent("CHALLENGE_MODE_START")
+frame:RegisterEvent("WORLD_STATE_TIMER_START")
 frame:RegisterEvent("PLAYER_LOGOUT")
 
 frame:SetScript("OnEvent", function(self, event, ...)
@@ -336,7 +293,6 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if PWT.isDisc and PWT.Atonement then PWT.Atonement:OnLogin() end
         if PWT.isDisc and PWT.Radiance  then PWT.Radiance:OnLogin()  end
         if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnLogin() end
-        if PWT.UtilityReminders then PWT.UtilityReminders:OnLogin() end
 
     elseif event == "PLAYER_SPECIALIZATION_CHANGED" then
         PWT:Debug("Specialization changed, re-checking class/spec.")
@@ -384,6 +340,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnEncounterStart() end
 
     elseif event == "CHALLENGE_MODE_START" then
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnChallengeModeArmed() end
+
+    elseif event == "WORLD_STATE_TIMER_START" then
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnChallengeModeStart() end
 
     elseif event == "PLAYER_LOGOUT" then
@@ -399,20 +358,10 @@ frame:SetScript("OnEvent", function(self, event, ...)
             PWT:Debug("Entering world, rescanning Atonement.")
             PWT.Atonement:ScanAll()
         end
-        if PWT.UtilityReminders then
-            -- Delay slightly so GetInstanceInfo() returns stable data
-            C_Timer.After(3, function()
-                if PWT.UtilityReminders then
-                    PWT.UtilityReminders:TriggerCheck()
-                end
-            end)
-        end
     end
 end)
 
--- ============================================================
---  Slash Commands
--- ============================================================
+-- Slash Commands
 
 SLASH_PWTB1 = "/pwtb"
 SLASH_PWTB2 = "/powerwordtoolbox"
@@ -469,8 +418,16 @@ SlashCmdList["PWTB"] = function(msg)
                 (PWT.Radiance.debugCasts and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
         end
 
+    elseif cmd == "vsguide" or cmd == "voidshield" or cmd == "voidshieldguide" then
+        if PWT.UI and PWT.UI.ShowVoidShieldGuide then
+            PWT.UI:ShowVoidShieldGuide()
+        else
+            PWT:Print("Void Shield guide is not available yet. Open options once and try again.")
+        end
+
     elseif cmd == "help" then
         PWT:Print("=== Power Word: Toolbox Commands ===")
+        PWT:Print("|cff00ccff/pwtb vsguide|r - open the Void Shield deck guide")
         PWT:Print("|cff00ccff/pwtb|r — open options")
         PWT:Print("|cff00ccff/pwtb debug|r — toggle debug mode")
         PWT:Print("|cff00ccff/pwtb rdebug|r — toggle Radiance cast event debug logging")

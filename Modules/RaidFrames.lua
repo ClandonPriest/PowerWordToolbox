@@ -1,8 +1,4 @@
--- ============================================================
---  Power Word: Toolbox  |  Modules/RaidFrames.lua
---  Finds a raid/party frame for a given unit token across all
---  supported raid frame addons.
--- ============================================================
+-- Power Word: Toolbox | Modules/RaidFrames.lua
 
 local _, PWT = ...
 
