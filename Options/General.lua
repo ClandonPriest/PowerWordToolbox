@@ -73,7 +73,10 @@ local modVSCheck = UI:MakeCheckbox(genContent, "Void Shield Deck", nil, function
     if not PWT.db.voidShieldDeck then PWT.db.voidShieldDeck = {} end
     PWT.db.voidShieldDeck.enabled = val
     if val then
-        if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:ShowWidget() end
+        if PWT.isDisc and PWT.VoidShieldDeck then
+            PWT.VoidShieldDeck:EnterUnknownState("module enabled")
+            PWT.VoidShieldDeck:ShowWidget()
+        end
     else
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:HideWidget() end
     end
@@ -240,6 +243,7 @@ local SLASH_CMDS = {
     { cmd = "/pwtb reset",    desc = "Re-centre the options window"                },
     { cmd = "/pwtb vsguide",  desc = "Show Void Shield Deck Guide"                 },
     { cmd = "/pwtb seqreset", desc = "Reset PI sequence back to position 1"        },
+    { cmd = "/pwtb casthistory", desc = "Print Void Shield cast history to chat"    },
     { cmd = "/pwtb debug",    desc = "Toggle debug mode"                           },
     { cmd = "/pwtb status",   desc = "Print full addon state to chat"              },
 }

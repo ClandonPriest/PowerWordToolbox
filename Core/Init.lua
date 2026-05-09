@@ -84,6 +84,10 @@ PWT.defaults = {
         savedCardsRemaining = nil,
         savedProcAvailable  = nil,
         savedCastHistory    = nil,
+        -- savedMapID/savedX/savedY written by SaveState, read+cleared by OnEnteringWorld
+        savedMapID = nil,
+        savedX     = nil,
+        savedY     = nil,
     },
     atonement = {
         enabled       = false,
@@ -223,8 +227,8 @@ local function MigrateDB()
         if vs.procSoundIndex   == nil then vs.procSoundIndex   = 5        end
         if vs.procSoundVolume  == nil then vs.procSoundVolume  = 1.0      end
         if vs.procSoundChannel == nil then vs.procSoundChannel = "SFX"    end
-        -- savedCardsRemaining/savedProcAvailable/savedCastHistory intentionally
-        -- left nil here; they are written by SaveState and consumed by OnEnteringWorld.
+        -- savedCardsRemaining/savedProcAvailable/savedCastHistory/savedMapID/savedX/savedY
+        -- intentionally left nil here; written by SaveState, consumed by OnEnteringWorld.
         -- posX/posY were replaced by per-element positions; remove legacy keys
         vs.posX = nil
         vs.posY = nil
@@ -288,6 +292,18 @@ frame:SetScript("OnEvent", function(self, event, ...)
         end
         if PWT.db.showLoginMessage then
             PWT:Print("Loaded! Type |cff00ccff/pwtb|r to open options.")
+        end
+        -- Print player coordinates if debug mode is on for voidshield
+        if PWT.db.debug and PWT.db.debugModules and PWT.db.debugModules.voidshield then
+            local mapID = C_Map.GetBestMapForUnit("player")
+            if mapID then
+                local mapInfo = C_Map.GetMapInfo(mapID)
+                local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+                if pos and mapInfo then
+                    local x, y = pos:GetXY()
+                    PWT:Debug(string.format("Player coordinates: %.1f%%, %.1f%% on %s", x * 100, y * 100, mapInfo.name), "voidshield")
+                end
+            end
         end
         if PWT.PI then PWT.PI:OnLogin() end
         if PWT.isDisc and PWT.Atonement then PWT.Atonement:OnLogin() end
@@ -411,12 +427,40 @@ SlashCmdList["PWTB"] = function(msg)
     elseif cmd == "spellcheck" then
         if PWT.PI then PWT.PI:PrintCooldownState() end
 
+    elseif cmd == "coords" then
+        local savedMapID = 0
+        local savedX = 0
+        local savedY = 0
+        if PWT.db and PWT.db.voidShieldDeck then
+            savedMapID = PWT.db.voidShieldDeck.savedMapID or 0
+            savedX = PWT.db.voidShieldDeck.savedX or 0
+            savedY = PWT.db.voidShieldDeck.savedY or 0
+        end
+        local currentMapID = 0
+        local currentX, currentY = 0, 0
+        local mapID = C_Map.GetBestMapForUnit("player")
+        if mapID then
+            currentMapID = mapID
+            local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+            if pos then
+                local x, y = pos:GetXY()
+                if x and y then
+                    currentX, currentY = x, y
+                end
+            end
+        end
+        PWT:Print(string.format("Saved coords: mapID=%s x=%.1f%% y=%.1f%%", tostring(savedMapID), savedX * 100, savedY * 100))
+        PWT:Print(string.format("Current coords: mapID=%s x=%.1f%% y=%.1f%%", tostring(currentMapID), currentX * 100, currentY * 100))
+
     elseif cmd == "rdebug" then
         if PWT.Radiance then
             PWT.Radiance:SetDebugCasts(not PWT.Radiance.debugCasts)
             PWT:Print("Radiance cast debug: " ..
                 (PWT.Radiance.debugCasts and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
         end
+
+    elseif cmd == "casthistory" then
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:PrintHistory() end
 
     elseif cmd == "vsguide" or cmd == "voidshield" or cmd == "voidshieldguide" then
         if PWT.UI and PWT.UI.ShowVoidShieldGuide then
@@ -433,7 +477,9 @@ SlashCmdList["PWTB"] = function(msg)
         PWT:Print("|cff00ccff/pwtb rdebug|r — toggle Radiance cast event debug logging")
         PWT:Print("|cff00ccff/pwtb status|r — print full addon state")
         PWT:Print("|cff00ccff/pwtb spellcheck|r — check PI cooldown state")
+        PWT:Print("|cff00ccff/pwtb coords|r — print saved and current player coordinates")
         PWT:Print("|cff00ccff/pwtb seqreset|r — reset PI sequence to position 1")
+        PWT:Print("|cff00ccff/pwtb casthistory|r — print Void Shield cast history")
         PWT:Print("|cff00ccff/pwtb reset|r — recentre options window")
 
     else

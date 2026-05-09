@@ -17,7 +17,7 @@ local PROC_TEXTURE_ID    = 7514191   -- Void Shield icon (proc active)
 local MAX_CARDS          = 3
 local OUTCOME_TIMEOUT    = 0.25      -- seconds to wait before assuming no-proc
 local PROC_ALERT_TIMEOUT = 6         -- seconds before proc icon alert auto-dismisses
-local CAST_HISTORY_MAX   = 4         -- rolling history depth for desync detection
+local CAST_HISTORY_MAX   = 25        -- rolling history depth for desync detection
 -- WoW provides 180 action slots total. Slots 1-72 cover Blizzard's default bars;
 -- slots 73-180 are used by action bar addons (Bartender4, Dominos, ElvUI, etc.)
 -- and must be included so FindPWSSlot works regardless of which bar addon is in use.
@@ -49,6 +49,11 @@ VSD.procAvailable   = true   -- proc card is still in the deck
 VSD.awaitingOutcome = false  -- true while waiting to detect this cast's result
 VSD.pendingCastID   = 0
 VSD.widgetVisible   = false  -- true while the module is actively displayed
+VSD.procUnconsumed    = false  -- true after proc detected, until PWS_PROC_SPELL_ID fires
+VSD.deckUnknown          = false  -- true = show ? and unknown-color cards
+VSD.deckUnknownAmbiguous = false  -- true only for ambiguous-proc boundary unknown; the only kind that clears on deck empty
+VSD.oldProcLive          = false  -- true when previous deck's proc is still live at deck boundary
+VSD.procTextureAtCast = false  -- snapshot: was proc texture active when penance was cast?
 
 -- Widget handles (created lazily in BuildWidget)
 local chanceWidget = nil
@@ -165,7 +170,7 @@ function VSD:GetChance()
     return self.cardsRemaining > 0 and (100 / self.cardsRemaining) or 0
 end
 
-function VSD:ResetDeck(reason)
+function VSD:ResetDeck(reason, forceKnown)
     self.cardsRemaining  = MAX_CARDS
     self.procAvailable   = true
     self.awaitingOutcome = false
@@ -174,6 +179,24 @@ function VSD:ResetDeck(reason)
         pendingTimer:Cancel()
         pendingTimer = nil
     end
+    if forceKnown then
+        self.deckUnknown          = false
+        self.deckUnknownAmbiguous = false
+        self.oldProcLive          = false
+    elseif reason == "deck empty" then
+        -- Only clear unknown if it was set by the ambiguous-proc boundary case, where we
+        -- deliberately counted 2 remaining cards and expect a natural exhaust. All other
+        -- unknown states (login, position mismatch, module enable) must persist until a
+        -- hard resync event (pattern match, encounter start, M+ start).
+        if self.deckUnknownAmbiguous then
+            self.deckUnknown          = false
+            self.deckUnknownAmbiguous = false
+        end
+        -- If the old proc is still unconsumed, mark it so the next penance can detect
+        -- ambiguity (proc texture active before cast = can't tell old vs new proc).
+        self.oldProcLive = self.procUnconsumed
+    end
+    self.procUnconsumed = false
     if reason ~= "deck empty" then
         WipeCastHistory()
     end
@@ -181,30 +204,102 @@ function VSD:ResetDeck(reason)
     self:RefreshWidget()
 end
 
-local function RecordOutcome(didProc)
+local function RecordEvent(eventType)
     castHistoryHead = (castHistoryHead % CAST_HISTORY_MAX) + 1
-    castHistory[castHistoryHead] = didProc
+    castHistory[castHistoryHead] = eventType
     if castHistorySize < CAST_HISTORY_MAX then castHistorySize = castHistorySize + 1 end
 end
 
--- Detects a desync pattern and corrects state if needed:
---   4 no-procs in a row: last four outcomes all no-proc → cardsRemaining=1, procAvailable=true
-function VSD:CheckDesync()
-    -- 4 consecutive no-procs: proc card must still be in the deck.
-    if castHistorySize >= 4
-        and GetHistoryEntry(0) == false and GetHistoryEntry(1) == false
-        and GetHistoryEntry(2) == false and GetHistoryEntry(3) == false
-    then
-        local expRemaining, expProc = 1, true
-        PWT:Print("Void Shield: 4 consecutive no-proc pattern detected – fixing deck to correct state.")
-        if self.cardsRemaining ~= expRemaining or self.procAvailable ~= expProc then
-            self.cardsRemaining = expRemaining
-            self.procAvailable  = expProc
-            self:RefreshWidget()
-            PWT:Print("Void Shield deck resynced: corrected to "
-                .. expRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
+-- Returns true if the proc at rawOffset `procOffset` was consumed (S appeared)
+-- before the next penance event (i.e., an S exists at a smaller offset than procOffset).
+local function IsProcStrong(procOffset)
+    for i = procOffset - 1, 0, -1 do
+        local e = GetHistoryEntry(i)
+        if e == "S" then return true end
+        if e == "P" or e == "N" then return false end
+    end
+    return false
+end
+
+-- Returns ordered list (newest first) of penance-only entries, each with
+-- { outcome="P"|"N", rawOffset=int, isStrong=bool|nil }
+local function GetPenanceHistory()
+    local result = {}
+    for i = 0, castHistorySize - 1 do
+        local e = GetHistoryEntry(i)
+        if e == "P" or e == "N" then
+            result[#result + 1] = {
+                outcome  = e,
+                rawOffset = i,
+                isStrong = (e == "P") and IsProcStrong(i) or nil,
+            }
         end
-        return
+    end
+    return result
+end
+
+-- True if ph[startIdx..startIdx+2] form a valid deck (exactly 1 P, 2 N).
+local function IsValidDeck(ph, startIdx)
+    if not (ph[startIdx] and ph[startIdx+1] and ph[startIdx+2]) then return false end
+    local p = 0
+    for i = startIdx, startIdx+2 do if ph[i].outcome == "P" then p = p + 1 end end
+    return p == 1
+end
+
+-- Returns the P entry within ph[startIdx..startIdx+2], or nil.
+local function GetDeckProc(ph, startIdx)
+    for i = startIdx, startIdx+2 do
+        if ph[i] and ph[i].outcome == "P" then return ph[i] end
+    end
+end
+
+-- Detects desync patterns and corrects state when confident enough to do so.
+function VSD:CheckDesync()
+    local ph = GetPenanceHistory()
+
+    -- Pattern 1: 4 consecutive no-procs → proc card must still be in deck
+    if #ph >= 4 then
+        if ph[1].outcome=="N" and ph[2].outcome=="N"
+           and ph[3].outcome=="N" and ph[4].outcome=="N" then
+            PWT:Debug("Void Shield: 4 no-proc pattern – resynced to 1/3 cards remaining.", "voidshield")
+            if self.cardsRemaining ~= 1 or self.procAvailable ~= true then
+                self.cardsRemaining       = 1
+                self.procAvailable        = true
+                self.deckUnknown          = false
+                self.deckUnknownAmbiguous = false
+                self:RefreshWidget()
+            end
+            return
+        end
+    end
+
+    -- Pattern 2: 2 consecutive strong procs → most recent proc was first card of current deck.
+    -- No N between them means ph[1] is the first and only penance drawn in the current deck.
+    -- Result: 2 no-proc cards remain, proc consumed. Only fires mid-deck (cardsRemaining > 0).
+    if self.cardsRemaining > 0 and #ph >= 2 then
+        if ph[1].outcome=="P" and ph[1].isStrong
+           and ph[2].outcome=="P" and ph[2].isStrong then
+            PWT:Debug("Void Shield: 2 consecutive strong procs – resynced to 0% / 2/3.", "voidshield")
+            self.cardsRemaining       = 2
+            self.procAvailable        = false
+            self.deckUnknown          = false
+            self.deckUnknownAmbiguous = false
+            self:RefreshWidget()
+            return
+        end
+    end
+
+    -- Pattern 3: 2 complete decks visible at deck exhaustion, both procs strong.
+    -- Clears procUnconsumed so the upcoming ResetDeck("deck empty") produces a known fresh deck.
+    if #ph >= 6 then
+        if IsValidDeck(ph,1) and IsValidDeck(ph,4) then
+            local p1, p2 = GetDeckProc(ph,1), GetDeckProc(ph,4)
+            if p1 and p1.isStrong and p2 and p2.isStrong then
+                PWT:Debug("Void Shield: 2-deck boundary confirmed – fresh deck will be known.", "voidshield")
+                self.procUnconsumed = false
+                return
+            end
+        end
     end
 end
 
@@ -213,9 +308,21 @@ local function PrintCastHistory()
     if castHistorySize == 0 then return end
     local parts = {}
     for i = castHistorySize - 1, 0, -1 do
-        parts[castHistorySize - i] = GetHistoryEntry(i) and "P" or "N"
+        parts[castHistorySize - i] = GetHistoryEntry(i) or "?"
     end
-    PWT:Debug("Void Shield cast history (oldest→newest): [" .. table.concat(parts, ", ") .. "]", "voidshield")
+    PWT:Debug("Void Shield cast history (oldest->newest): [" .. table.concat(parts, ", ") .. "]", "voidshield")
+end
+
+function VSD:PrintHistory()
+    if castHistorySize == 0 then
+        PWT:Print("Void Shield: cast history is empty.")
+        return
+    end
+    local parts = {}
+    for i = castHistorySize - 1, 0, -1 do
+        parts[castHistorySize - i] = GetHistoryEntry(i) or "?"
+    end
+    PWT:Print("Void Shield cast history (oldest->newest): [" .. table.concat(parts, ", ") .. "]")
 end
 
 function VSD:ApplyCastResult(didProc)
@@ -225,7 +332,40 @@ function VSD:ApplyCastResult(didProc)
         pendingTimer = nil
     end
 
+    -- If the previous deck's proc was still live when this penance was cast,
+    -- check whether the proc texture was already showing at cast time.
+    -- If it was, we can't distinguish old proc still showing vs new proc fired.
+    if self.oldProcLive then
+        local wasProc = self.procTextureAtCast
+        self.oldProcLive       = false
+        self.procTextureAtCast = false
+        if didProc and wasProc then
+            -- This penance drew card 1 of the new deck while the old proc was still
+            -- active. We can't tell if the proc texture is the old proc or a new one.
+            -- Enter unknown state, but count this penance as already drawn (2 remain),
+            -- and set procAvailable=false so the 2 remaining cards use the early-return
+            -- path — keeping the deck countdown correct without false proc detections.
+            self.cardsRemaining       = MAX_CARDS - 1
+            self.procAvailable        = false
+            self.procUnconsumed       = true
+            self.deckUnknown          = true
+            self.deckUnknownAmbiguous = true
+            self.awaitingOutcome      = false
+            self.pendingCastID   = 0
+            if pendingTimer then pendingTimer:Cancel(); pendingTimer = nil end
+            WipeCastHistory()
+            self:HideProcAlert()
+            PWT:Debug("Void Shield: unknown state - ambiguous proc at deck boundary", "voidshield")
+            PWT:Print("Void Shield Deck Status currently unknown. Waiting for a hard reset condition or pattern match to resync.")
+            self:RefreshWidget()
+            return
+        end
+        -- wasProc=false: old proc was consumed/expired before this penance; detection is clean.
+        -- didProc=false: no new proc regardless; fall through to record N.
+    end
+
     if didProc then
+        self.procUnconsumed = true
         self.procAvailable = false
         PWT:Debug("Void Shield proc detected. Cards remaining: " .. (self.cardsRemaining - 1) .. "/" .. MAX_CARDS, "voidshield")
         if PWT.db and PWT.db.voidShieldDeck then
@@ -237,7 +377,7 @@ function VSD:ApplyCastResult(didProc)
     self.cardsRemaining = math.max(0, self.cardsRemaining - 1)
 
     -- Record the outcome AFTER state is updated so CheckDesync sees current values.
-    RecordOutcome(didProc)
+    RecordEvent(didProc and "P" or "N")
     PrintCastHistory()
 
     if self.cardsRemaining == 0 then
@@ -266,7 +406,7 @@ end
 function VSD:OnPenanceCast()
     if not self.procAvailable then
         self.cardsRemaining = math.max(0, self.cardsRemaining - 1)
-        RecordOutcome(false)
+        RecordEvent("N")
         PrintCastHistory()
         if self.cardsRemaining == 0 then
             self:ResetDeck("deck empty")
@@ -285,6 +425,10 @@ function VSD:OnPenanceCast()
     end
     if not pwsSlot then pwsSlot = FindPWSSlot() end
     if not pwsSlot then self:ShowPWSWarning() end
+
+    -- Snapshot proc texture state before the penance resolves.
+    -- Used in ApplyCastResult to detect old-proc contamination.
+    self.procTextureAtCast = self.oldProcLive and IsProcTextureActive() or false
 
     self.awaitingOutcome = true
     self.pendingCastID   = self.pendingCastID + 1
@@ -320,9 +464,15 @@ function VSD:GetCardColor(kind)
 end
 
 local function ApplyCardColors()
-    if cardTextures[1] then cardTextures[1]:SetColorTexture(VSD:GetCardColor("noProc")) end
-    if cardTextures[2] then cardTextures[2]:SetColorTexture(VSD:GetCardColor("noProc")) end
-    if cardTextures[3] then cardTextures[3]:SetColorTexture(VSD:GetCardColor("proc")) end
+    if VSD.deckUnknown then
+        for i = 1, MAX_CARDS do
+            if cardTextures[i] then cardTextures[i]:SetColorTexture(VSD:GetCardColor("unknown")) end
+        end
+    else
+        if cardTextures[1] then cardTextures[1]:SetColorTexture(VSD:GetCardColor("noProc")) end
+        if cardTextures[2] then cardTextures[2]:SetColorTexture(VSD:GetCardColor("noProc")) end
+        if cardTextures[3] then cardTextures[3]:SetColorTexture(VSD:GetCardColor("proc"))   end
+    end
 end
 
 local function MakeSubWidget(frameName, posXKey, posYKey)
@@ -413,15 +563,27 @@ function VSD:UpdateWidget()
 
     -- Chance
     chanceLabel:SetFont(fontPath, chanceFontSz, "OUTLINE")
-    local chanceVal = FormatChance(self:GetChance())
-    chanceLabel:SetText(cfg.showChanceLabel ~= false and ("Chance: " .. chanceVal) or chanceVal)
+    local chanceText
+    if self.deckUnknown then
+        chanceText = cfg.showChanceLabel ~= false and "Chance: ?" or "?"
+    else
+        local chanceVal = FormatChance(self:GetChance())
+        chanceText = cfg.showChanceLabel ~= false and ("Chance: " .. chanceVal) or chanceVal
+    end
+    chanceLabel:SetText(chanceText)
     chanceWidget:SetSize(math.max(60, chanceLabel:GetStringWidth() + 10), chanceFontSz + 10)
 
     -- Deck count
     deckLabel:SetFont(fontPath, deckFontSz, "OUTLINE")
     local cards = self.cardsRemaining or MAX_CARDS
-    local deckVal = cards .. " / " .. MAX_CARDS
-    deckLabel:SetText(cfg.showDeckLabel ~= false and ("Deck: " .. deckVal) or deckVal)
+    local deckText
+    if self.deckUnknown then
+        deckText = cfg.showDeckLabel ~= false and ("Deck: ? / " .. MAX_CARDS) or ("? / " .. MAX_CARDS)
+    else
+        local deckVal = cards .. " / " .. MAX_CARDS
+        deckText = cfg.showDeckLabel ~= false and ("Deck: " .. deckVal) or deckVal
+    end
+    deckLabel:SetText(deckText)
     deckWidget:SetSize(math.max(60, deckLabel:GetStringWidth() + 10), deckFontSz + 10)
 
     -- Card visuals: resize and reposition all cards from cfg each update.
@@ -464,14 +626,20 @@ function VSD:UpdateWidget()
 
     -- Card slot visuals.
     -- Slots 1 & 2 = no-proc cards, slot 3 = proc card.
-    local remainingRed = self.procAvailable
-        and math.max(0, cards - 1)
-        or  cards
-    for i = 1, 2 do
-        if cardTextures[i] then cardTextures[i]:SetShown(i <= remainingRed) end
-    end
-    if cardTextures[3] then
-        cardTextures[3]:SetShown(self.procAvailable == true)
+    if self.deckUnknown then
+        for i = 1, MAX_CARDS do
+            if cardTextures[i] then cardTextures[i]:SetShown(i <= self.cardsRemaining) end
+        end
+    else
+        local remainingRed = self.procAvailable
+            and math.max(0, cards - 1)
+            or  cards
+        for i = 1, 2 do
+            if cardTextures[i] then cardTextures[i]:SetShown(i <= remainingRed) end
+        end
+        if cardTextures[3] then
+            cardTextures[3]:SetShown(self.procAvailable == true)
+        end
     end
 end
 
@@ -486,25 +654,43 @@ function VSD:RefreshWidget()
     ApplyCardColors()
 
     -- Chance label text + resize to fit new text.
-    local chanceVal = FormatChance(self:GetChance())
-    chanceLabel:SetText(cfg.showChanceLabel ~= false and ("Chance: " .. chanceVal) or chanceVal)
+    local chanceText
+    if self.deckUnknown then
+        chanceText = cfg.showChanceLabel ~= false and "Chance: ?" or "?"
+    else
+        local chanceVal = FormatChance(self:GetChance())
+        chanceText = cfg.showChanceLabel ~= false and ("Chance: " .. chanceVal) or chanceVal
+    end
+    chanceLabel:SetText(chanceText)
     chanceWidget:SetSize(math.max(60, chanceLabel:GetStringWidth() + 10), chanceFontSz + 10)
 
     -- Deck label text + resize to fit new text.
     local cards = self.cardsRemaining or MAX_CARDS
-    local deckVal = cards .. " / " .. MAX_CARDS
-    deckLabel:SetText(cfg.showDeckLabel ~= false and ("Deck: " .. deckVal) or deckVal)
+    local deckText
+    if self.deckUnknown then
+        deckText = cfg.showDeckLabel ~= false and ("Deck: ? / " .. MAX_CARDS) or ("? / " .. MAX_CARDS)
+    else
+        local deckVal = cards .. " / " .. MAX_CARDS
+        deckText = cfg.showDeckLabel ~= false and ("Deck: " .. deckVal) or deckVal
+    end
+    deckLabel:SetText(deckText)
     deckWidget:SetSize(math.max(60, deckLabel:GetStringWidth() + 10), deckFontSz + 10)
 
     -- Card slot visuals.
-    local remainingRed = self.procAvailable
-        and math.max(0, cards - 1)
-        or  cards
-    for i = 1, 2 do
-        if cardTextures[i] then cardTextures[i]:SetShown(i <= remainingRed) end
-    end
-    if cardTextures[3] then
-        cardTextures[3]:SetShown(self.procAvailable == true)
+    if self.deckUnknown then
+        for i = 1, MAX_CARDS do
+            if cardTextures[i] then cardTextures[i]:SetShown(i <= self.cardsRemaining) end
+        end
+    else
+        local remainingRed = self.procAvailable
+            and math.max(0, cards - 1)
+            or  cards
+        for i = 1, 2 do
+            if cardTextures[i] then cardTextures[i]:SetShown(i <= remainingRed) end
+        end
+        if cardTextures[3] then
+            cardTextures[3]:SetShown(self.procAvailable == true)
+        end
     end
 end
 
@@ -793,6 +979,12 @@ function VSD:OnSpellCast(unit, spellID)
     -- PWS cast (base or Void Shield proc) while alert is active → dismiss it.
     if spellID == PWS_SPELL_ID or spellID == PWS_PROC_SPELL_ID then
         if self.procAlertActive then self:HideProcAlert() end
+        if spellID == PWS_PROC_SPELL_ID then
+            self.oldProcLive = false  -- proc consumed; next penance detection is clean
+            RecordEvent("S")
+            self.procUnconsumed = false
+            self:CheckDesync()
+        end
         return
     end
 
@@ -811,6 +1003,21 @@ function VSD:SaveState()
     for i = castHistorySize - 1, 0, -1 do
         vs.savedCastHistory[castHistorySize - i] = GetHistoryEntry(i)
     end
+    -- Save current player coordinates
+    local mapID = C_Map.GetBestMapForUnit("player")
+    vs.savedMapID = mapID or 0
+    vs.savedX = 0
+    vs.savedY = 0
+    if mapID then
+        local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+        if pos then
+            local x, y = pos:GetXY()
+            if x and y then
+                vs.savedX = x
+                vs.savedY = y
+            end
+        end
+    end
 end
 
 function VSD:RestoreState()
@@ -818,25 +1025,69 @@ function VSD:RestoreState()
     local vs = PWT.db.voidShieldDeck
     self.cardsRemaining = vs.savedCardsRemaining
     self.procAvailable  = vs.savedProcAvailable
+    self.deckUnknown    = false
     WipeCastHistory()
     if vs.savedCastHistory then
         for _, v in ipairs(vs.savedCastHistory) do
-            RecordOutcome(v)
+            if v == true then RecordEvent("P")
+            elseif v == false then RecordEvent("N")
+            else RecordEvent(v)
+            end
         end
     end
     -- Consume the saved state so it is not reapplied on a subsequent real login.
     vs.savedCardsRemaining = nil
     vs.savedProcAvailable  = nil
     vs.savedCastHistory    = nil
+    vs.savedMapID = nil; vs.savedX = nil; vs.savedY = nil
     PWT:Print("Void Shield deck state restored after reload: "
         .. self.cardsRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
+end
+
+function VSD:EnterUnknownState(reason)
+    self.cardsRemaining       = MAX_CARDS
+    self.procAvailable        = true
+    self.deckUnknown          = true
+    self.deckUnknownAmbiguous = false
+    self.procUnconsumed       = false
+    self.oldProcLive          = false
+    self.procTextureAtCast    = false
+    self.awaitingOutcome      = false
+    self.pendingCastID     = 0
+    if pendingTimer then pendingTimer:Cancel(); pendingTimer = nil end
+    WipeCastHistory()
+    self:HideProcAlert()
+    PWT:Debug("Void Shield: unknown state" .. (reason and (" - " .. reason) or ""), "voidshield")
+    PWT:Print("Void Shield Deck Status currently unknown. Waiting for a hard reset condition or pattern match to resync.")
+    self:RefreshWidget()
+end
+
+local POSITION_THRESHOLD = 0.005
+local function CheckPositionMatch(vs)
+    if not vs.savedMapID or vs.savedMapID == 0 then return false end
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if mapID ~= vs.savedMapID then return false end
+    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+    if not pos then return false end
+    local x, y = pos:GetXY()
+    if not x or not y then return false end
+    return math.abs(x - (vs.savedX or 0)) < POSITION_THRESHOLD
+        and math.abs(y - (vs.savedY or 0)) < POSITION_THRESHOLD
 end
 
 function VSD:OnEnteringWorld(isReload)
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
     if isReload and vs.savedCardsRemaining ~= nil then
-        self:RestoreState()
+        if CheckPositionMatch(vs) then
+            self:RestoreState()
+        else
+            self:EnterUnknownState("position mismatch on reload")
+            vs.savedCardsRemaining = nil
+            vs.savedProcAvailable  = nil
+            vs.savedCastHistory    = nil
+            vs.savedMapID = nil; vs.savedX = nil; vs.savedY = nil
+        end
         self:RefreshWidget()
     end
     -- Fresh logins and reloads without saved state are handled by OnLogin below.
@@ -848,20 +1099,17 @@ function VSD:OnLogin()
     self:BuildSoundList()
     BuildButtonFrameCache()
 
-    if PWT.db.voidShieldDeck.savedCardsRemaining == nil
-       and self.cardsRemaining ~= MAX_CARDS then
-        -- State was already restored by OnEnteringWorld; just find the slot and show.
+    local vs = PWT.db.voidShieldDeck
+    -- Already in a known/unknown state from OnEnteringWorld — don't overwrite.
+    if (vs.savedCardsRemaining == nil and self.cardsRemaining ~= MAX_CARDS)
+       or self.deckUnknown then
         pwsSlot = FindPWSSlot()
-        if PWT.db.voidShieldDeck.enabled and PWT.isDisc then
-            self:ShowWidget()
-        end
+        if vs.enabled and PWT.isDisc then self:ShowWidget() end
         return
     end
-    self:ResetDeck("login")
+    self:EnterUnknownState("login")
     pwsSlot = FindPWSSlot()
-    if PWT.db.voidShieldDeck.enabled and PWT.isDisc then
-        self:ShowWidget()
-    end
+    if vs.enabled and PWT.isDisc then self:ShowWidget() end
 end
 
 function VSD:OnLeaveCombat()
@@ -874,7 +1122,7 @@ function VSD:OnEncounterStart()
     -- Only reset for raid encounters; M+ runs are handled by OnChallengeModeStart.
     local _, instanceType = GetInstanceInfo()
     if instanceType ~= "raid" then return end
-    self:ResetDeck("raid encounter start")
+    self:ResetDeck("raid encounter start", true)
     pwsSlot = FindPWSSlot()
 end
 
@@ -884,7 +1132,7 @@ function VSD:OnChallengeModeStart()
        and not C_ChallengeMode.IsChallengeModeActive() then
         return
     end
-    self:ResetDeck("Mythic+ timer start")
+    self:ResetDeck("Mythic+ timer start", true)
     pwsSlot = FindPWSSlot()
 end
 
