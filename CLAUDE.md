@@ -40,10 +40,24 @@ PowerWordToolbox.toc            — Addon metadata; files load in declaration or
 - Proc detection reads `GetActionTexture(slot)` for slots 1–180. Slots 73–180 are addon bars (Bartender4, Dominos, ElvUI) — using only 1–72 misses them.
 - `pwsSlot` is re-validated on every Penance cast via `GetActionInfo`; stale cache (user moved PWS off bar) is caught immediately and triggers a full rescan.
 - `procAvailable = false` is the false-positive guard. When false, `OnPenanceCast` takes the early-return branch and skips all texture detection entirely.
-- Cast history is a ring buffer (`CAST_HISTORY_MAX = 4`); `RecordOutcome` is O(1). History survives natural deck resets but clears on login/encounter/challenge reset.
-- Deck state persists across `/reload` via `SaveState` (PLAYER_LOGOUT) and `RestoreState` (PLAYER_ENTERING_WORLD). Does not survive a DC.
+- Cast history is a ring buffer (`CAST_HISTORY_MAX = 25`); `RecordEvent(eventType)` is O(1). Each slot is a string: `"P"` (penance proc), `"N"` (penance no-proc), `"S"` (Void Shield / PWS_PROC_SPELL_ID cast = proc consumed). History survives natural deck resets but clears on login/encounter/challenge reset and when entering unknown state.
+- Deck state persists across `/reload` via `SaveState` (PLAYER_LOGOUT) and `RestoreState` (PLAYER_ENTERING_WORLD). Does not survive a DC. `SaveState` also writes `savedMapID`, `savedX`, `savedY` (player map position). On reload, `OnEnteringWorld` checks position match (`POSITION_THRESHOLD = 0.005`) before calling `RestoreState`; position mismatch calls `EnterUnknownState("position mismatch on reload")` instead.
 - Three independent draggable sub-widgets (`chanceWidget`, `deckWidget`, `cardsWidget`) each save position separately in the DB.
-- `CheckDesync` has one condition: 4 consecutive no-procs → `cardsRemaining=1, procAvailable=true`. The back-to-back proc condition was removed. `CheckDesync` must run before `ResetDeck` when the deck empties — the desync fix may set `cardsRemaining` to a non-zero value, which should skip the reset.
+- `CheckDesync` runs after every penance and after every S event. It has three patterns, all debug-only (no chat prints):
+  - **Pattern 1:** 4 consecutive no-procs → `cardsRemaining=1, procAvailable=true, deckUnknown=false`. Fires even when not in unknown state.
+  - **Pattern 2:** 2 consecutive strong procs (both with an S event before the next penance) → `cardsRemaining=2, procAvailable=false, deckUnknown=false`. Only fires when `cardsRemaining > 0`. Requires S event to have been recorded first so `IsProcStrong` can return true.
+  - **Pattern 3:** 2 complete valid decks (each exactly 1 P + 2 N) visible in history at deck exhaustion, both procs strong → clears `procUnconsumed` so the upcoming `ResetDeck("deck empty")` produces a known fresh deck. Does not call `ResetDeck` itself.
+- `CheckDesync` must run before `ResetDeck` when the deck empties — Pattern 1 may set `cardsRemaining` to a non-zero value and the subsequent reset must be skipped.
+- **State variables beyond the basics:**
+  - `procUnconsumed` — true after proc detected, until PWS_PROC_SPELL_ID fires. Used by `ResetDeck` to set `oldProcLive`.
+  - `deckUnknown` — true = show `?` and grey-purple cards. Cleared only by hard resets (`forceKnown=true`), Patterns 1/2, or `ResetDeck("deck empty")` when `deckUnknownAmbiguous` is true.
+  - `deckUnknownAmbiguous` — set true only by the inline ambiguous-boundary path in `ApplyCastResult`. This is the only unknown state that clears on natural deck exhaustion. All other unknown states (login, position mismatch, module enable) persist until a hard resync event.
+  - `oldProcLive` — true when the previous deck's proc was still unconsumed at deck boundary. Set by `ResetDeck("deck empty")` when `procUnconsumed` is true. Cleared when PWS_PROC_SPELL_ID fires or on any hard reset.
+  - `procTextureAtCast` — snapshot of `IsProcTextureActive()` taken at penance cast time, only when `oldProcLive` is true. Used in `ApplyCastResult` to detect false proc detection at new deck start.
+- **Ambiguous boundary (inline unknown state):** When `oldProcLive=true` and a proc is detected and the proc texture was already active at cast time (`wasProc=true`), `ApplyCastResult` enters unknown state inline without calling `EnterUnknownState`. Sets `cardsRemaining=MAX_CARDS-1` (penance already drawn), `procAvailable=false`, `deckUnknownAmbiguous=true`. This correctly tracks 2 remaining cards through their natural exhaust.
+- **`EnterUnknownState(reason)`:** Full reset to `cardsRemaining=MAX_CARDS, procAvailable=true, deckUnknown=true, deckUnknownAmbiguous=false`. Called on login, module enable, and position-mismatch reload. Always prints a chat message. Never used for the ambiguous-boundary case.
+- **`ResetDeck(reason, forceKnown)`:** `forceKnown=true` clears all unknown flags (raid encounter start, M+ key start). `reason="deck empty"` only clears `deckUnknown` if `deckUnknownAmbiguous` is true; otherwise unknown persists.
+- **Widget unknown display:** When `deckUnknown=true`, chance shows `?`, deck shows `? / 3`, cards show `cardsRemaining` grey-purple cards (not always 3 — ambiguous boundary shows 2).
 
 ### PI
 - Uses LibCustomGlow (bundled) for the raid-frame target highlight.
@@ -84,3 +98,5 @@ PowerWordToolbox.toc            — Addon metadata; files load in declaration or
 | `/pwtb spellcheck` | Check PI cooldown state |
 | `/pwtb seqreset` | Reset PI sequence to position 1 |
 | `/pwtb reset` | Re-centre options window |
+| `/pwtb vsguide` | Show Void Shield Deck Guide |
+| `/pwtb casthistory` | Print Void Shield cast history to chat |

@@ -17,7 +17,7 @@ local PROC_TEXTURE_ID    = 7514191   -- Void Shield icon (proc active)
 local MAX_CARDS          = 3
 local OUTCOME_TIMEOUT    = 0.25      -- seconds to wait before assuming no-proc
 local PROC_ALERT_TIMEOUT = 6         -- seconds before proc icon alert auto-dismisses
-local CAST_HISTORY_MAX   = 25        -- rolling history depth for desync detection
+local CAST_HISTORY_MAX   = 50        -- rolling history depth for desync detection
 -- WoW provides 180 action slots total. Slots 1-72 cover Blizzard's default bars;
 -- slots 73-180 are used by action bar addons (Bartender4, Dominos, ElvUI, etc.)
 -- and must be included so FindPWSSlot works regardless of which bar addon is in use.
@@ -54,6 +54,7 @@ VSD.deckUnknown          = false  -- true = show ? and unknown-color cards
 VSD.deckUnknownAmbiguous = false  -- true only for ambiguous-proc boundary unknown; the only kind that clears on deck empty
 VSD.oldProcLive          = false  -- true when previous deck's proc is still live at deck boundary
 VSD.procTextureAtCast = false  -- snapshot: was proc texture active when penance was cast?
+VSD.stateInitialized  = false  -- true once RestoreState has run; prevents OnLogin overwriting it
 
 -- Widget handles (created lazily in BuildWidget)
 local chanceWidget = nil
@@ -68,6 +69,13 @@ local cardTextures = {}
 
 local pendingTimer = nil
 local pwsSlot      = nil   -- action-bar slot that holds PWS / Void Shield
+
+-- Position cache — updated every 5s by positionTicker; written to SavedVariables by SaveState.
+-- C_Map APIs are unreliable at logout time, so we cache during active gameplay instead.
+local cachedMapID    = 0
+local cachedX        = 0
+local cachedY        = 0
+local positionTicker = nil
 
 -- Cast history ring buffer (CAST_HISTORY_MAX slots, O(1) insert).
 -- Survives natural deck resets; cleared on login/encounter/challenge resets.
@@ -208,6 +216,9 @@ local function RecordEvent(eventType)
     castHistoryHead = (castHistoryHead % CAST_HISTORY_MAX) + 1
     castHistory[castHistoryHead] = eventType
     if castHistorySize < CAST_HISTORY_MAX then castHistorySize = castHistorySize + 1 end
+    PWT:Debug("Void Shield: +[" .. eventType .. "] cards=" .. VSD.cardsRemaining
+        .. " procAvail=" .. tostring(VSD.procAvailable)
+        .. " unknown=" .. tostring(VSD.deckUnknown), "voidshield")
 end
 
 -- Returns true if the proc at rawOffset `procOffset` was consumed (S appeared)
@@ -238,66 +249,84 @@ local function GetPenanceHistory()
     return result
 end
 
--- True if ph[startIdx..startIdx+2] form a valid deck (exactly 1 P, 2 N).
-local function IsValidDeck(ph, startIdx)
-    if not (ph[startIdx] and ph[startIdx+1] and ph[startIdx+2]) then return false end
-    local p = 0
-    for i = startIdx, startIdx+2 do if ph[i].outcome == "P" then p = p + 1 end end
-    return p == 1
-end
-
--- Returns the P entry within ph[startIdx..startIdx+2], or nil.
-local function GetDeckProc(ph, startIdx)
-    for i = startIdx, startIdx+2 do
-        if ph[i] and ph[i].outcome == "P" then return ph[i] end
+-- Returns true if ph[base..base+2] is a valid deck: exactly 1 strong P and 2 N (any order).
+local function IsValidDeck(ph, base)
+    local pCount, nCount, strongP = 0, 0, false
+    for i = 0, 2 do
+        local e = ph[base + i]
+        if not e then return false end
+        if e.outcome == "P" then
+            pCount = pCount + 1
+            if e.isStrong then strongP = true end
+        elseif e.outcome == "N" then
+            nCount = nCount + 1
+        end
     end
+    return pCount == 1 and nCount == 2 and strongP
 end
 
 -- Detects desync patterns and corrects state when confident enough to do so.
 function VSD:CheckDesync()
     local ph = GetPenanceHistory()
+    if not self.deckUnknown then return end
 
-    -- Pattern 1: 4 consecutive no-procs → proc card must still be in deck
-    if #ph >= 4 then
-        if ph[1].outcome=="N" and ph[2].outcome=="N"
-           and ph[3].outcome=="N" and ph[4].outcome=="N" then
-            PWT:Debug("Void Shield: 4 no-proc pattern – resynced to 1/3 cards remaining.", "voidshield")
-            if self.cardsRemaining ~= 1 or self.procAvailable ~= true then
-                self.cardsRemaining       = 1
-                self.procAvailable        = true
-                self.deckUnknown          = false
-                self.deckUnknownAmbiguous = false
-                self:RefreshWidget()
+    -- Pattern 1: [NNP anchor (strong)] [k×3 penances, k≥0] [P — new proc on card 1 of fresh deck]
+    --
+    -- ph (newest→oldest): ph[1]=P, ph[s..s+2] is the NNP anchor (ph[s]=P strong, ph[s+1]=N, ph[s+2]=N)
+    -- Anchor isStrong: S event exists between anchor proc and next penance in raw history,
+    -- confirming the proc was consumed. Prevents an unconsumed NNP proc (buff still active)
+    -- from matching as a false anchor.
+    -- Intermediate blocks ph[2..s-1]: each group of 3 must be a valid deck (1 strong P + 2 N).
+    -- Result: proc is card 1 of new deck, 2 no-procs remain → 0% / 2 cards left.
+    if #ph >= 4 and ph[1].outcome == "P" then
+        for k = 0, math.floor((#ph - 4) / 3) do
+            local s = 2 + k * 3
+            if not (ph[s] and ph[s+1] and ph[s+2]) then break end
+            if ph[s].outcome=="P" and ph[s].isStrong
+               and ph[s+1].outcome=="N" and ph[s+2].outcome=="N" then
+                local valid = true
+                for j = 0, k - 1 do
+                    if not IsValidDeck(ph, 2 + j * 3) then valid = false; break end
+                end
+                if valid then
+                    PWT:Debug("Void Shield: Pattern1 – NNP→P, resynced to 0%/2/3.", "voidshield")
+                    self.cardsRemaining       = 2
+                    self.procAvailable        = false
+                    self.deckUnknown          = false
+                    self.deckUnknownAmbiguous = false
+                    self:RefreshWidget()
+                    return
+                end
             end
-            return
         end
     end
 
-    -- Pattern 2: 2 consecutive strong procs → most recent proc was first card of current deck.
-    -- No N between them means ph[1] is the first and only penance drawn in the current deck.
-    -- Result: 2 no-proc cards remain, proc consumed. Only fires mid-deck (cardsRemaining > 0).
-    if self.cardsRemaining > 0 and #ph >= 2 then
-        if ph[1].outcome=="P" and ph[1].isStrong
-           and ph[2].outcome=="P" and ph[2].isStrong then
-            PWT:Debug("Void Shield: 2 consecutive strong procs – resynced to 0% / 2/3.", "voidshield")
-            self.cardsRemaining       = 2
-            self.procAvailable        = false
-            self.deckUnknown          = false
-            self.deckUnknownAmbiguous = false
-            self:RefreshWidget()
-            return
-        end
-    end
-
-    -- Pattern 3: 2 complete decks visible at deck exhaustion, both procs strong.
-    -- Clears procUnconsumed so the upcoming ResetDeck("deck empty") produces a known fresh deck.
-    if #ph >= 6 then
-        if IsValidDeck(ph,1) and IsValidDeck(ph,4) then
-            local p1, p2 = GetDeckProc(ph,1), GetDeckProc(ph,4)
-            if p1 and p1.isStrong and p2 and p2.isStrong then
-                PWT:Debug("Void Shield: 2-deck boundary confirmed – fresh deck will be known.", "voidshield")
-                self.procUnconsumed = false
-                return
+    -- Pattern 2: [PNN anchor (strong)] [k×3 penances, k≥0] [N N — two no-procs of fresh deck]
+    --
+    -- ph (newest→oldest): ph[1]=N, ph[2]=N, ph[s..s+2] is the PNN anchor
+    -- (ph[s]=N, ph[s+1]=N, ph[s+2]=P strong).
+    -- k=0 (ph[1..5]=N,N,N,N,P) subsumes the old "4 consecutive no-procs" pattern.
+    -- Intermediate blocks ph[3..s-1]: each group of 3 must be a valid deck (1 strong P + 2 N).
+    -- Result: 2 penances drawn (both no-proc), proc must be last card → 100% / 1 card left.
+    if #ph >= 5 and ph[1].outcome == "N" and ph[2].outcome == "N" then
+        for k = 0, math.floor((#ph - 5) / 3) do
+            local s = 3 + k * 3
+            if not (ph[s] and ph[s+1] and ph[s+2]) then break end
+            if ph[s].outcome=="N" and ph[s+1].outcome=="N"
+               and ph[s+2].outcome=="P" and ph[s+2].isStrong then
+                local valid = true
+                for j = 0, k - 1 do
+                    if not IsValidDeck(ph, 3 + j * 3) then valid = false; break end
+                end
+                if valid then
+                    PWT:Debug("Void Shield: Pattern2 – PNN→NN, resynced to 100%/1/3.", "voidshield")
+                    self.cardsRemaining       = 1
+                    self.procAvailable        = true
+                    self.deckUnknown          = false
+                    self.deckUnknownAmbiguous = false
+                    self:RefreshWidget()
+                    return
+                end
             end
         end
     end
@@ -356,7 +385,6 @@ function VSD:ApplyCastResult(didProc)
             WipeCastHistory()
             self:HideProcAlert()
             PWT:Debug("Void Shield: unknown state - ambiguous proc at deck boundary", "voidshield")
-            PWT:Print("Void Shield Deck Status currently unknown. Waiting for a hard reset condition or pattern match to resync.")
             self:RefreshWidget()
             return
         end
@@ -379,6 +407,14 @@ function VSD:ApplyCastResult(didProc)
     -- Record the outcome AFTER state is updated so CheckDesync sees current values.
     RecordEvent(didProc and "P" or "N")
     PrintCastHistory()
+
+    -- Ambiguous unknown exit: proc detected on card 2 (cardsRemaining now 1). The old proc was
+    -- already consumed (procUnconsumed was false at cast time, so detection ran), meaning this is
+    -- a genuine new proc. Card 3 is a known no-proc — exit to 0%/1/3 now.
+    if self.deckUnknownAmbiguous and didProc and self.cardsRemaining == 1 then
+        self.deckUnknown          = false
+        self.deckUnknownAmbiguous = false
+    end
 
     if self.cardsRemaining == 0 then
         -- Check patterns before resetting — history still contains this outcome.
@@ -404,7 +440,12 @@ function VSD:CheckForProc()
 end
 
 function VSD:OnPenanceCast()
-    if not self.procAvailable then
+    -- In any unknown state procAvailable is meaningless; use procUnconsumed as the guard instead.
+    -- If a proc is already tracked and not yet consumed, the texture is from that proc — skip
+    -- detection. If procUnconsumed=false, no active tracked proc exists and detection is safe.
+    local skipDetection = (not self.deckUnknown and not self.procAvailable)
+                       or (self.deckUnknown and self.procUnconsumed)
+    if skipDetection then
         self.cardsRemaining = math.max(0, self.cardsRemaining - 1)
         RecordEvent("N")
         PrintCastHistory()
@@ -627,8 +668,10 @@ function VSD:UpdateWidget()
     -- Card slot visuals.
     -- Slots 1 & 2 = no-proc cards, slot 3 = proc card.
     if self.deckUnknown then
+        -- Ambiguous unknown tracks cardsRemaining (2 known cards left); full unknown always shows all 3.
+        local visibleCards = self.deckUnknownAmbiguous and self.cardsRemaining or MAX_CARDS
         for i = 1, MAX_CARDS do
-            if cardTextures[i] then cardTextures[i]:SetShown(i <= self.cardsRemaining) end
+            if cardTextures[i] then cardTextures[i]:SetShown(i <= visibleCards) end
         end
     else
         local remainingRed = self.procAvailable
@@ -678,8 +721,10 @@ function VSD:RefreshWidget()
 
     -- Card slot visuals.
     if self.deckUnknown then
+        -- Ambiguous unknown tracks cardsRemaining (2 known cards left); full unknown always shows all 3.
+        local visibleCards = self.deckUnknownAmbiguous and self.cardsRemaining or MAX_CARDS
         for i = 1, MAX_CARDS do
-            if cardTextures[i] then cardTextures[i]:SetShown(i <= self.cardsRemaining) end
+            if cardTextures[i] then cardTextures[i]:SetShown(i <= visibleCards) end
         end
     else
         local remainingRed = self.procAvailable
@@ -982,6 +1027,7 @@ function VSD:OnSpellCast(unit, spellID)
         if spellID == PWS_PROC_SPELL_ID then
             self.oldProcLive = false  -- proc consumed; next penance detection is clean
             RecordEvent("S")
+            PrintCastHistory()
             self.procUnconsumed = false
             self:CheckDesync()
         end
@@ -993,39 +1039,33 @@ function VSD:OnSpellCast(unit, spellID)
     C_Timer.After(0.05, function() self:CheckForProc() end)
 end
 
--- Writes deck state to SavedVariables. Only reached on /reload, not DC.
+-- Writes deck state to SavedVariables. Called on PLAYER_CAMPING (logout) and PLAYER_LOGOUT (reload). Not reached on DC/crash.
 function VSD:SaveState()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
-    vs.savedCardsRemaining = self.cardsRemaining
-    vs.savedProcAvailable  = self.procAvailable
+    vs.savedCardsRemaining      = self.cardsRemaining
+    vs.savedProcAvailable       = self.procAvailable
+    vs.savedDeckUnknown         = self.deckUnknown
+    vs.savedDeckUnknownAmbiguous = self.deckUnknownAmbiguous
     vs.savedCastHistory = {}
     for i = castHistorySize - 1, 0, -1 do
         vs.savedCastHistory[castHistorySize - i] = GetHistoryEntry(i)
     end
-    -- Save current player coordinates
-    local mapID = C_Map.GetBestMapForUnit("player")
-    vs.savedMapID = mapID or 0
-    vs.savedX = 0
-    vs.savedY = 0
-    if mapID then
-        local pos = C_Map.GetPlayerMapPosition(mapID, "player")
-        if pos then
-            local x, y = pos:GetXY()
-            if x and y then
-                vs.savedX = x
-                vs.savedY = y
-            end
-        end
+    -- Write cached position (polled every 5s during gameplay; always valid at save time).
+    if cachedMapID ~= 0 then
+        vs.savedMapID = cachedMapID
+        vs.savedX     = cachedX
+        vs.savedY     = cachedY
     end
 end
 
 function VSD:RestoreState()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
-    self.cardsRemaining = vs.savedCardsRemaining
-    self.procAvailable  = vs.savedProcAvailable
-    self.deckUnknown    = false
+    self.cardsRemaining       = vs.savedCardsRemaining
+    self.procAvailable        = vs.savedProcAvailable
+    self.deckUnknown          = vs.savedDeckUnknown         or false
+    self.deckUnknownAmbiguous = vs.savedDeckUnknownAmbiguous or false
     WipeCastHistory()
     if vs.savedCastHistory then
         for _, v in ipairs(vs.savedCastHistory) do
@@ -1036,15 +1076,18 @@ function VSD:RestoreState()
         end
     end
     -- Consume the saved state so it is not reapplied on a subsequent real login.
-    vs.savedCardsRemaining = nil
-    vs.savedProcAvailable  = nil
-    vs.savedCastHistory    = nil
-    vs.savedMapID = nil; vs.savedX = nil; vs.savedY = nil
+    -- Coords are intentionally left — they persist until overwritten by the next SaveState.
+    vs.savedCardsRemaining       = nil
+    vs.savedProcAvailable        = nil
+    vs.savedCastHistory          = nil
+    vs.savedDeckUnknown          = nil
+    vs.savedDeckUnknownAmbiguous = nil
+    self.stateInitialized = true
     PWT:Print("Void Shield deck state restored after reload: "
         .. self.cardsRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
 end
 
-function VSD:EnterUnknownState(reason)
+function VSD:EnterUnknownState(reason, chatMsg)
     self.cardsRemaining       = MAX_CARDS
     self.procAvailable        = true
     self.deckUnknown          = true
@@ -1058,39 +1101,65 @@ function VSD:EnterUnknownState(reason)
     WipeCastHistory()
     self:HideProcAlert()
     PWT:Debug("Void Shield: unknown state" .. (reason and (" - " .. reason) or ""), "voidshield")
-    PWT:Print("Void Shield Deck Status currently unknown. Waiting for a hard reset condition or pattern match to resync.")
+    PWT:Print(chatMsg or "Void Shield Deck Status currently unknown. Waiting for a hard reset condition or pattern match to resync.")
     self:RefreshWidget()
 end
 
-local POSITION_THRESHOLD = 0.005
+local function PollPosition()
+    local mapID = C_Map.GetBestMapForUnit("player")
+    if not mapID or mapID == 0 then return end
+    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+    if not pos then return end
+    local x, y = pos:GetXY()
+    if not x or not y then return end
+    cachedMapID = mapID
+    cachedX     = x
+    cachedY     = y
+end
+
+local POSITION_THRESHOLD = 0.02   -- 2% of map; absorbs ~5s of movement drift from the poll interval
 local function CheckPositionMatch(vs)
     if not vs.savedMapID or vs.savedMapID == 0 then return false end
-    local mapID = C_Map.GetBestMapForUnit("player")
-    if mapID ~= vs.savedMapID then return false end
-    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
-    if not pos then return false end
-    local x, y = pos:GetXY()
-    if not x or not y then return false end
-    return math.abs(x - (vs.savedX or 0)) < POSITION_THRESHOLD
-        and math.abs(y - (vs.savedY or 0)) < POSITION_THRESHOLD
+    if cachedMapID == 0 then return false end
+    if cachedMapID ~= vs.savedMapID then return false end
+    return math.abs(cachedX - (vs.savedX or 0)) < POSITION_THRESHOLD
+        and math.abs(cachedY - (vs.savedY or 0)) < POSITION_THRESHOLD
 end
 
 function VSD:OnEnteringWorld(isReload)
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
-    if isReload and vs.savedCardsRemaining ~= nil then
-        if CheckPositionMatch(vs) then
-            self:RestoreState()
-        else
-            self:EnterUnknownState("position mismatch on reload")
-            vs.savedCardsRemaining = nil
-            vs.savedProcAvailable  = nil
-            vs.savedCastHistory    = nil
-            vs.savedMapID = nil; vs.savedX = nil; vs.savedY = nil
+    if vs.savedCardsRemaining ~= nil then
+        local function TryRestore(isRetry)
+            PollPosition()
+            if cachedMapID ~= 0 then
+                if CheckPositionMatch(vs) then
+                    self:RestoreState()
+                else
+                    self:EnterUnknownState(
+                        "potential disconnect or crash detected",
+                        "Void Shield: Potential disconnect or crash detected. Deck state set to Unknown."
+                    )
+                    vs.savedCardsRemaining = nil
+                    vs.savedProcAvailable  = nil
+                    vs.savedCastHistory    = nil
+                end
+                self:RefreshWidget()
+            elseif not isRetry then
+                C_Timer.After(0.5, function() TryRestore(true) end)
+            else
+                self:EnterUnknownState(
+                    "position unavailable after login",
+                    "Void Shield: Could not read player position on login. Deck state set to Unknown."
+                )
+                vs.savedCardsRemaining = nil
+                vs.savedProcAvailable  = nil
+                vs.savedCastHistory    = nil
+                self:RefreshWidget()
+            end
         end
-        self:RefreshWidget()
+        C_Timer.After(2, function() TryRestore(false) end)
     end
-    -- Fresh logins and reloads without saved state are handled by OnLogin below.
 end
 
 function VSD:OnLogin()
@@ -1099,9 +1168,16 @@ function VSD:OnLogin()
     self:BuildSoundList()
     BuildButtonFrameCache()
 
+    if not positionTicker then
+        PollPosition()
+        positionTicker = C_Timer.NewTicker(5, PollPosition)
+    end
+
     local vs = PWT.db.voidShieldDeck
-    -- Already in a known/unknown state from OnEnteringWorld — don't overwrite.
-    if (vs.savedCardsRemaining == nil and self.cardsRemaining ~= MAX_CARDS)
+    -- Defer to OnEnteringWorld if saved state exists (fresh login: OnEnteringWorld hasn't run yet).
+    -- Skip if state was already initialized by OnEnteringWorld (reload: it ran first).
+    if vs.savedCardsRemaining ~= nil
+       or self.stateInitialized
        or self.deckUnknown then
         pwsSlot = FindPWSSlot()
         if vs.enabled and PWT.isDisc then self:ShowWidget() end
@@ -1110,6 +1186,16 @@ function VSD:OnLogin()
     self:EnterUnknownState("login")
     pwsSlot = FindPWSSlot()
     if vs.enabled and PWT.isDisc then self:ShowWidget() end
+end
+
+function VSD:OnSpecChange()
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    pwsSlot = FindPWSSlot()
+    if PWT.isDisc and PWT.db.voidShieldDeck.enabled then
+        self:ShowWidget()
+    else
+        self:HideWidget()
+    end
 end
 
 function VSD:OnLeaveCombat()

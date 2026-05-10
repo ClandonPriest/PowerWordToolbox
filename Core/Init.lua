@@ -267,6 +267,7 @@ frame:RegisterEvent("ENCOUNTER_START")
 frame:RegisterEvent("CHALLENGE_MODE_START")
 frame:RegisterEvent("WORLD_STATE_TIMER_START")
 frame:RegisterEvent("PLAYER_LOGOUT")
+frame:RegisterEvent("PLAYER_CAMPING")
 
 frame:SetScript("OnEvent", function(self, event, ...)
     if event == "ADDON_LOADED" then
@@ -317,7 +318,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             PWT.Atonement:OnLogin()
         end
         if PWT.isDisc and PWT.Radiance  then PWT.Radiance:OnLogin()  end
-        if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnLogin() end
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnSpecChange() end
 
     elseif event == "PLAYER_TALENT_UPDATE" or event == "TRAIT_CONFIG_UPDATED" then
         PWT:Debug("Talent event fired: " .. event, "radiance")
@@ -360,6 +361,9 @@ frame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "WORLD_STATE_TIMER_START" then
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnChallengeModeStart() end
+
+    elseif event == "PLAYER_CAMPING" then
+        if PWT.VoidShieldDeck then PWT.VoidShieldDeck:SaveState() end
 
     elseif event == "PLAYER_LOGOUT" then
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:SaveState() end
@@ -462,6 +466,11 @@ SlashCmdList["PWTB"] = function(msg)
     elseif cmd == "casthistory" then
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:PrintHistory() end
 
+    elseif cmd == "forceunknown" then
+        if PWT.VoidShieldDeck then
+            PWT.VoidShieldDeck:EnterUnknownState("manual")
+        end
+
     elseif cmd == "vsguide" or cmd == "voidshield" or cmd == "voidshieldguide" then
         if PWT.UI and PWT.UI.ShowVoidShieldGuide then
             PWT.UI:ShowVoidShieldGuide()
@@ -480,6 +489,7 @@ SlashCmdList["PWTB"] = function(msg)
         PWT:Print("|cff00ccff/pwtb coords|r — print saved and current player coordinates")
         PWT:Print("|cff00ccff/pwtb seqreset|r — reset PI sequence to position 1")
         PWT:Print("|cff00ccff/pwtb casthistory|r — print Void Shield cast history")
+        PWT:Print("|cff00ccff/pwtb forceunknown|r — force Void Shield deck into unknown state (testing)")
         PWT:Print("|cff00ccff/pwtb reset|r — recentre options window")
 
     else
