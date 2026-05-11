@@ -55,6 +55,7 @@ VSD.deckUnknownAmbiguous = false  -- true only for ambiguous-proc boundary unkno
 VSD.oldProcLive          = false  -- true when previous deck's proc is still live at deck boundary
 VSD.procTextureAtCast = false  -- snapshot: was proc texture active when penance was cast?
 VSD.stateInitialized  = false  -- true once RestoreState has run; prevents OnLogin overwriting it
+VSD.mPlusEventGuard = true   -- guard ON by default; opened briefly by CHALLENGE_MODE_START, closed again by first WORLD_STATE_TIMER_START (dome drop)
 
 -- Widget handles (created lazily in BuildWidget)
 local chanceWidget = nil
@@ -1212,20 +1213,18 @@ function VSD:OnEncounterStart()
     pwsSlot = FindPWSSlot()
 end
 
-function VSD:OnChallengeModeStart()
-    if not PWT.db or not PWT.db.voidShieldDeck or not PWT.db.voidShieldDeck.enabled then return end
-    if C_ChallengeMode and C_ChallengeMode.IsChallengeModeActive
-       and not C_ChallengeMode.IsChallengeModeActive() then
-        return
-    end
-    self:ResetDeck("Mythic+ timer start", true)
-    pwsSlot = FindPWSSlot()
+function VSD:OnChallengeModeArmed()
+    -- CHALLENGE_MODE_START fires at key activation (10-sec countdown).
+    -- Open the gate so the upcoming dome drop (WORLD_STATE_TIMER_START) can fire the deck reset.
+    self.mPlusEventGuard = false
 end
 
-function VSD:OnChallengeModeArmed()
-    -- CHALLENGE_MODE_START fires when the key is activated and the 10 second
-    -- waiting-room countdown begins. Void Shield resets when the timer starts,
-    -- handled by WORLD_STATE_TIMER_START.
+function VSD:OnChallengeModeStart()
+    if not PWT.db or not PWT.db.voidShieldDeck or not PWT.db.voidShieldDeck.enabled then return end
+    if self.mPlusEventGuard then return end
+    self.mPlusEventGuard = true
+    self:ResetDeck("Mythic+ timer start", true)
+    pwsSlot = FindPWSSlot()
 end
 
 function VSD:PrintStatus()

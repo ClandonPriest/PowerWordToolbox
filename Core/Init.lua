@@ -471,6 +471,11 @@ SlashCmdList["PWTB"] = function(msg)
             PWT.VoidShieldDeck:EnterUnknownState("manual")
         end
 
+    elseif cmd == "mplusguard" then
+        if PWT.VoidShieldDeck then
+            PWT:Print("mPlusEventGuard = " .. tostring(PWT.VoidShieldDeck.mPlusEventGuard))
+        end
+
     elseif cmd == "vsguide" or cmd == "voidshield" or cmd == "voidshieldguide" then
         if PWT.UI and PWT.UI.ShowVoidShieldGuide then
             PWT.UI:ShowVoidShieldGuide()
@@ -489,6 +494,7 @@ SlashCmdList["PWTB"] = function(msg)
         PWT:Print("|cff00ccff/pwtb coords|r — print saved and current player coordinates")
         PWT:Print("|cff00ccff/pwtb seqreset|r — reset PI sequence to position 1")
         PWT:Print("|cff00ccff/pwtb casthistory|r — print Void Shield cast history")
+        PWT:Print("|cff00ccff/pwtb mplusguard|r — print the M+ timer-started flag (testing)")
         PWT:Print("|cff00ccff/pwtb forceunknown|r — force Void Shield deck into unknown state (testing)")
         PWT:Print("|cff00ccff/pwtb reset|r — recentre options window")
 
