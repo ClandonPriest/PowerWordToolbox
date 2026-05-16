@@ -18,11 +18,11 @@ Tracks PI whisper requests from your group members and highlights the highest-pr
 3. Choose a mode:
    - **Priority List** — on any combat whisper, glows the first player from your list who is currently in the group. Add players in priority order; drag rows to reorder, click × to remove.
    - **PI Sequence** — glows players in a fixed sequence, advancing one position per whisper. Resets automatically on boss pull. The "Repeat last entry" option loops the final player instead of cycling back to position 1.
-4. Configure alert settings to your preference:
-   - **Glow** — choose between a full overlay or outer border glow style, pick a color, and adjust opacity/pulse speed. Use the Test button to preview on your own frame.
-   - **Sound** — pick a sound and volume. Preview plays immediately.
-   - **Early Request** — when PI is still on cooldown and a whisper arrives within the grace window (default 5s), the glow triggers early with a countdown overlay so you can pre-aim.
-5. Optionally enable the **Name Overlay** — a floating frame showing the PI target's name and icon. Unlock it to drag it anywhere on screen.
+4. Configure alert settings:
+   - **Glow** — choose between a full overlay or outer border ring style, pick a color, and adjust opacity and pulse speed. Use the Test button to preview on your own frame.
+   - **Sound** — pick a sound and volume. Supports LibSharedMedia if installed.
+   - **Early Request** — when PI is still on cooldown and a whisper arrives within the grace window (default 5s before it comes back), the glow triggers early with a live countdown so you can pre-aim.
+5. Optionally enable the **Name Overlay** — a floating bouncing frame showing the PI target's name and icon. Unlock it to drag it anywhere on screen.
 
 ---
 
@@ -33,62 +33,81 @@ Displays the current number of active Atonements on your group and optionally sh
 **Setup:**
 1. Enable the module on the General tab.
 2. Open the Atonement tab and configure:
-   - **Show lowest Atonement timer** — adds a countdown that turns yellow below 6s and red below 3s.
-   - **Follow mouse cursor** — the widget floats near your cursor as you cast, useful if you prefer to not lock it to a fixed position. Choose which corner of the widget attaches to the cursor.
-   - **Text Size** — set the font size for the count and timer numbers independently.
+   - **Show lowest Atonement timer** — adds a countdown below the count that turns yellow below 6s and red below 3s.
+   - **Follow mouse cursor** — the widget floats near your cursor as you cast. Choose which corner of the widget attaches to the cursor.
+   - **Text Size** — set font sizes for the count and timer independently.
 3. Use **Unlock to Move** in the Position section to drag the widget anywhere, then **Lock Position** to save it.
 4. **Reset Position** returns the widget to the screen centre.
 
-The widget background and resize handle appear when unlocked. Lock it before raiding to keep it clean.
+The drag handle and background appear only when unlocked. Lock before raiding to keep the display clean.
 
 ---
 
 ### Radiance Bars
 
-Two charge bars that fill as your Power Word: Radiance charges come off cooldown. Gives you a quick at-a-glance view of how far through the cooldown each charge is without watching cooldown numbers.
+Two charge bars showing how far through the cooldown each Power Word: Radiance charge is. Gives an at-a-glance fill progress without watching numbers.
 
 The cooldown is detected automatically from your talents — 15s with Bright Pupil, 18s baseline. The detected talent is shown at the top of the tab.
 
 **Setup:**
 1. Enable the module on the General tab.
-2. Open the Radiance Bars tab and configure size, fill color, and whether to show a countdown timer on the actively recharging bar.
+2. Open the Radiance Bars tab and configure bar size, fill color, text color, and whether to show a countdown timer on the actively recharging charge.
 3. Use **Unlock to Move** to drag the bars anywhere, then **Lock Position** to save.
 
 ---
 
 ### Void Shield Deck
 
-Tracks your Void Shield talent deck. Void Shield works as a 3-card deck (2 non-proc cards and 1 proc card). Each Penance cast draws a card; the proc chance is 1-in-remaining cards. The module displays your current proc chance, how many cards remain in the deck, and fires a sound + visual alert the moment a proc is detected.
+Tracks your Void Shield proc. Void Shield works as a 3-card deck: 2 non-proc cards and 1 proc card. Each Penance cast draws one card. The proc chance is 1-in-remaining-cards. The tracker shows your current proc chance, cards remaining in the deck, and fires a configurable sound and visual alert the moment a proc is detected.
 
-**How detection works:** the module watches the texture of your Power Word: Shield action bar button after each Penance cast. When it detects the Void Shield texture, a proc has occurred.
+**How detection works:** after each Penance cast, the tracker checks the texture of your Power Word: Shield action bar slot. When it sees the Void Shield icon, a proc has occurred.
 
-**Widgets:** three independent draggable elements — the proc chance display, the deck card count, and the individual card indicators. Each can be positioned separately.
+**Three independent draggable widgets:**
+- **Chance** — shows the current proc probability (e.g. 50%, 100%)
+- **Deck** — shows cards remaining out of 3
+- **Cards** — colour-coded card indicators (green = proc card, red = no-proc cards)
 
 **Setup:**
 1. Enable the module on the General tab.
-2. Open the Void Shield tab and configure:
-   - **Display** — toggle each of the three sub-widgets on or off, adjust their sizes and colors.
-   - **Proc Alert** — enable a sound and/or on-screen flash when a proc is detected. Choose the sound from the dropdown.
-   - **Desync correction** — if the tracker falls out of sync (4 Penance casts with no proc detected), it automatically corrects to the most likely deck state.
-3. Position each widget independently using the lock/unlock buttons in the Position section.
+2. Open the Void Shield tab:
+   - **Display** — toggle each widget on or off; adjust font sizes, card sizes, and custom colors for each card type.
+   - **Cards Rotated** — switches the card indicators from a horizontal row to a vertical stack.
+   - **Proc Alert** — enable a floating Void Shield icon that appears when a proc is detected. Configure its size, position, and frame strata.
+   - **Proc Sound** — plays a sound on proc detection. Supports LibSharedMedia for custom sounds.
+3. Position each widget independently using its lock/unlock button in the Position section.
 
-> **Note:** Void Shield requires Power Word: Shield to be on an action bar (any bar, including addon bars). If you remove it from your bars mid-session the tracker will warn you.
+**Unknown state:** the tracker enters an unknown state (shows `?`) on login, after a potential disconnect, or when it cannot confidently determine the deck position. It clears automatically when a confirmed resync pattern is detected in your cast history, or when entering a raid encounter or starting a new Mythic+ key.
+
+> **Note:** Void Shield requires Power Word: Shield to be on an action bar (any bar, including addon bars like Bartender4 or ElvUI). If PWS is removed from your bars mid-session, a warning will appear on screen.
 
 ---
 
 ## General Settings
 
 - **Audio Channel** — which WoW audio channel sounds play through (SFX, Master, Music, Ambience, Dialog).
-- **Interface Font** — changes the font used throughout the addon's UI. Supports LibSharedMedia fonts if installed.
+- **Interface Font** — changes the font used across the addon's UI. Supports LibSharedMedia fonts if installed.
+- **Show Chat Messages** — toggles all addon chat output.
+- **Show Login Message** — toggles the "Loaded!" message on login.
 
 ---
 
 ## Slash Commands
 
+All commands work with `/pwtb`, `/powerwordtoolbox`, `/ptw`, or `/pwt`.
+
 | Command | What it does |
 |---|---|
 | `/pwtb` | Open the options window |
+| `/pwtb help` | Print all slash commands to chat |
 | `/pwtb debug` | Toggle debug logging to chat |
+| `/pwtb rdebug` | Toggle Radiance cast event debug logging |
 | `/pwtb status` | Print full addon state to chat |
-| `/pwtb reset` | Re-centre the options window if it goes off-screen |
+| `/pwtb spellcheck` | Check the PI cooldown tracker state |
 | `/pwtb seqreset` | Reset the PI sequence back to position 1 |
+| `/pwtb reset` | Re-centre the options window if it goes off-screen |
+| `/pwtb coords` | Print the saved and current player coordinates used by the Void Shield position check |
+| `/pwtb vsguide` | Open the Void Shield deck guide |
+| `/pwtb casthistory` | Print the Void Shield cast history to chat |
+| `/pwtb mplusguard` | Print the M+ event guard state (for testing) |
+| `/pwtb forceunknown` | Force the Void Shield deck into unknown state (for testing) |
+| `/pwtb forceknown` | Force the Void Shield deck into a known state (for testing — values will be incorrect) |

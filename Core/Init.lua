@@ -84,10 +84,10 @@ PWT.defaults = {
         savedCardsRemaining = nil,
         savedProcAvailable  = nil,
         savedCastHistory    = nil,
-        -- savedMapID/savedX/savedY written by SaveState, read+cleared by OnEnteringWorld
-        savedMapID = nil,
-        savedX     = nil,
-        savedY     = nil,
+        -- savedWorldX/Y/instanceID written by SaveState (UnitPosition), read by OnEnteringWorld
+        savedWorldX     = nil,
+        savedWorldY     = nil,
+        savedInstanceID = nil,
     },
     atonement = {
         enabled       = false,
@@ -173,6 +173,11 @@ local function MigrateDB()
         if pi.glowStyle       == nil then pi.glowStyle       = "overlay" end
         if pi.borderThickness == nil then pi.borderThickness = 3 end
         if pi.glowEnabled     == nil then pi.glowEnabled     = true end
+        if pi.glowR           == nil then pi.glowR           = 1.0  end
+        if pi.glowG           == nil then pi.glowG           = 0.85 end
+        if pi.glowB           == nil then pi.glowB           = 0.0  end
+        if pi.glowOpacity     == nil then pi.glowOpacity     = 0.55 end
+        if pi.glowPulse       == nil then pi.glowPulse       = 0.6  end
         if pi.soundEnabled    == nil then pi.soundEnabled    = true end
         if pi.soundIndex      == nil then pi.soundIndex      = 5 end
         if pi.soundVolume     == nil then pi.soundVolume     = 1.0 end
@@ -292,9 +297,8 @@ frame:SetScript("OnEvent", function(self, event, ...)
             return
         end
         if PWT.db.showLoginMessage then
-            PWT:Print("Loaded! Type |cff00ccff/pwtb|r to open options.")
+            PWT:Print("Loaded! Type |cff00ccff/pwtb|r to open options, or |cff00ccff/pwt help|r for commands.")
         end
-        -- Print player coordinates if debug mode is on for voidshield
         if PWT.db.debug and PWT.db.debugModules and PWT.db.debugModules.voidshield then
             local mapID = C_Map.GetBestMapForUnit("player")
             if mapID then
@@ -432,29 +436,18 @@ SlashCmdList["PWTB"] = function(msg)
         if PWT.PI then PWT.PI:PrintCooldownState() end
 
     elseif cmd == "coords" then
-        local savedMapID = 0
-        local savedX = 0
-        local savedY = 0
-        if PWT.db and PWT.db.voidShieldDeck then
-            savedMapID = PWT.db.voidShieldDeck.savedMapID or 0
-            savedX = PWT.db.voidShieldDeck.savedX or 0
-            savedY = PWT.db.voidShieldDeck.savedY or 0
+        local vs = PWT.db and PWT.db.voidShieldDeck
+        local posY, posX, _, instanceID = UnitPosition("player")
+        if vs and vs.savedWorldX then
+            PWT:Print(string.format("Saved position:   x=%.1f y=%.1f instance=%s", vs.savedWorldX, vs.savedWorldY or 0, tostring(vs.savedInstanceID or 0)))
+        else
+            PWT:Print("Saved position: none")
         end
-        local currentMapID = 0
-        local currentX, currentY = 0, 0
-        local mapID = C_Map.GetBestMapForUnit("player")
-        if mapID then
-            currentMapID = mapID
-            local pos = C_Map.GetPlayerMapPosition(mapID, "player")
-            if pos then
-                local x, y = pos:GetXY()
-                if x and y then
-                    currentX, currentY = x, y
-                end
-            end
+        if posX then
+            PWT:Print(string.format("Current position: x=%.1f y=%.1f instance=%s", posX, posY or 0, tostring(instanceID or 0)))
+        else
+            PWT:Print("Current position: unavailable")
         end
-        PWT:Print(string.format("Saved coords: mapID=%s x=%.1f%% y=%.1f%%", tostring(savedMapID), savedX * 100, savedY * 100))
-        PWT:Print(string.format("Current coords: mapID=%s x=%.1f%% y=%.1f%%", tostring(currentMapID), currentX * 100, currentY * 100))
 
     elseif cmd == "rdebug" then
         if PWT.Radiance then
@@ -471,6 +464,13 @@ SlashCmdList["PWTB"] = function(msg)
             PWT.VoidShieldDeck:EnterUnknownState("manual")
         end
 
+    elseif cmd == "forceknown" then
+        if PWT.VoidShieldDeck then
+            PWT:Print("|cffff4444WARNING:|r forceknown forces a known state with arbitrary values. For debug only — this state is likely incorrect.")
+            PWT.VoidShieldDeck:ResetDeck("manual forceknown", true)
+            PWT.VoidShieldDeck:RefreshWidget()
+        end
+
     elseif cmd == "mplusguard" then
         if PWT.VoidShieldDeck then
             PWT:Print("mPlusEventGuard = " .. tostring(PWT.VoidShieldDeck.mPlusEventGuard))
@@ -485,18 +485,20 @@ SlashCmdList["PWTB"] = function(msg)
 
     elseif cmd == "help" then
         PWT:Print("=== Power Word: Toolbox Commands ===")
-        PWT:Print("|cff00ccff/pwtb vsguide|r - open the Void Shield deck guide")
-        PWT:Print("|cff00ccff/pwtb|r — open options")
+        PWT:Print("|cff00ccff/pwtb vsguide|r — open the Void Shield deck guide")
         PWT:Print("|cff00ccff/pwtb debug|r — toggle debug mode")
-        PWT:Print("|cff00ccff/pwtb rdebug|r — toggle Radiance cast event debug logging")
-        PWT:Print("|cff00ccff/pwtb status|r — print full addon state")
-        PWT:Print("|cff00ccff/pwtb spellcheck|r — check PI cooldown state")
-        PWT:Print("|cff00ccff/pwtb coords|r — print saved and current player coordinates")
-        PWT:Print("|cff00ccff/pwtb seqreset|r — reset PI sequence to position 1")
-        PWT:Print("|cff00ccff/pwtb casthistory|r — print Void Shield cast history")
-        PWT:Print("|cff00ccff/pwtb mplusguard|r — print the M+ timer-started flag (testing)")
-        PWT:Print("|cff00ccff/pwtb forceunknown|r — force Void Shield deck into unknown state (testing)")
         PWT:Print("|cff00ccff/pwtb reset|r — recentre options window")
+        if PWT.db.debug then
+            PWT:Print("|cff00ccff/pwtb status|r — print full addon state")
+            PWT:Print("|cff00ccff/pwtb spellcheck|r — check PI cooldown state")
+            PWT:Print("|cff00ccff/pwtb coords|r — print saved and current player coordinates")
+            PWT:Print("|cff00ccff/pwtb seqreset|r — reset PI sequence to position 1")
+            PWT:Print("|cff00ccff/pwtb casthistory|r — print Void Shield cast history")
+            PWT:Print("|cff00ccff/pwtb rdebug|r — toggle Radiance cast event debug logging")
+            PWT:Print("|cff00ccff/pwtb mplusguard|r — print the M+ event guard state")
+            PWT:Print("|cff00ccff/pwtb forceunknown|r — force Void Shield deck into unknown state")
+            PWT:Print("|cff00ccff/pwtb forceknown|r — force Void Shield deck into known state (values will be incorrect)")
+        end
 
     else
         if PWT.UI then PWT.UI:Toggle() end

@@ -96,7 +96,6 @@ local settingsHdr = UI:MakeSectionHeader(genContent, genLine1, -10, "Settings")
 
 local SETTING_LABEL_W = 110   -- fixed label column width for alignment
 
--- Audio Channel
 local SOUND_CHANNELS = {
     { label = "SFX (Default)", value = "SFX"      },
     { label = "Master",        value = "Master"    },
@@ -242,10 +241,7 @@ local SLASH_CMDS = {
     { cmd = "/pwtb",          desc = "Open this options window"                    },
     { cmd = "/pwtb reset",    desc = "Re-centre the options window"                },
     { cmd = "/pwtb vsguide",  desc = "Show Void Shield Deck Guide"                 },
-    { cmd = "/pwtb seqreset", desc = "Reset PI sequence back to position 1"        },
-    { cmd = "/pwtb casthistory", desc = "Print Void Shield cast history to chat"    },
     { cmd = "/pwtb debug",    desc = "Toggle debug mode"                           },
-    { cmd = "/pwtb status",   desc = "Print full addon state to chat"              },
 }
 
 local CMD_W = 120

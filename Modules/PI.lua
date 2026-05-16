@@ -158,7 +158,6 @@ function PI:ApplyGlow(frame, playerName)
 
             local thick  = cfg.borderThickness or 3
             local spread = math.max(8, thick * 5)
-            -- rings: distance from frame edge -> opacity
             local ringDefs = {
                 { dist=0,             alpha=1.00 },
                 { dist=spread*0.25,   alpha=0.60 },
@@ -168,7 +167,6 @@ function PI:ApplyGlow(frame, playerName)
             }
             local lineW = math.max(3, thick)
 
-            -- Build strip textures for all rings upfront
             local strips = {}  -- { tex, ringIdx, side }
             for i, rd in ipairs(ringDefs) do
                 for _, side in ipairs({"top","bot","left","right"}) do
@@ -187,7 +185,6 @@ function PI:ApplyGlow(frame, playerName)
                 self:SetAlpha(alpha)
             end)
 
-            -- Position all strips relative to frame directly — no coordinate conversion
             for _, s in ipairs(strips) do
                 local d = ringDefs[s.ringIdx].dist
                 local t = s.tex
@@ -516,7 +513,6 @@ function PI:CreateOverlayWidget()
     bgTex:SetColorTexture(0.08, 0.04, 0.18, 0)  -- alpha=0 by default
     f.bgTex = bgTex
 
-    -- PI spell icon
     local icon = f:CreateTexture(nil, "ARTWORK")
     icon:SetSize(44, 44)
     icon:SetPoint("LEFT", f, "LEFT", 0, 0)
@@ -525,7 +521,6 @@ function PI:CreateOverlayWidget()
     icon:SetTexture(spellInfo and spellInfo.iconID or 135926)
     f.icon = icon
 
-    -- "Give [name] PI" label
     local nameText = f:CreateFontString(nil, "OVERLAY")
     nameText:SetPoint("LEFT",  icon, "RIGHT", 8, 0)
     nameText:SetPoint("RIGHT", f,    "RIGHT", 0, 0)
@@ -549,7 +544,6 @@ function PI:CreateOverlayWidget()
     bounceDown:SetSmoothing("IN_OUT")
     f.bounceAG = bounceAG
 
-    -- Restore saved position
     f:ClearAllPoints()
     local px = PWT.db and PWT.db.pi and PWT.db.pi.overlayPosX
     local py = PWT.db and PWT.db.pi and PWT.db.pi.overlayPosY

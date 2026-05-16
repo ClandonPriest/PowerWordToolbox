@@ -66,7 +66,6 @@ radLine3:SetPoint("TOPRIGHT", radPanel, "TOPRIGHT", -PAD, -12)
 
 local displayHdr = UI:MakeSectionHeader(radPanel, radLine3, -12, "Display")
 
--- Color pickers (keep MakeColorSwatch as-is — already custom, no template)
 local function MakeColorSwatch(parent, r, g, b, onChanged)
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(22, 22)

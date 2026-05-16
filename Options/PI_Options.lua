@@ -10,7 +10,6 @@ local piPanel = UI:AddTab("pi", "Power Infusion", 2)
 
 local RefreshList  -- forward declaration, defined after row pool is built
 
--- Mode selector
 local modeLabel = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
 modeLabel:SetPoint("TOPLEFT", piPanel, "TOPLEFT", 0, -PAD)
 modeLabel:SetText("Mode:")
@@ -48,7 +47,6 @@ UI.modePriorityBtn = modePriorityBtn
 local modeSequenceBtn = MakeModeButton("PWT_ModeSequenceBtn", "PI Sequence", modePriorityBtn, 6)
 UI.modeSequenceBtn = modeSequenceBtn
 
--- Sequence position indicator
 local seqIndexLabel = piPanel:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
 UI.seqIndexLabel = seqIndexLabel
 seqIndexLabel:SetPoint("LEFT", modeSequenceBtn, "RIGHT", 10, 0)
@@ -188,7 +186,6 @@ listFrame:SetHeight(1)
 listScroll:SetScrollChild(listFrame)
 UI:MakeBg(listFrame, {0, 0, 0, 0.25})
 
--- Row pool
 local listRows = {}
 local DRAG_INDEX = nil
 

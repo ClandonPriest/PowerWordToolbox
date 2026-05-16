@@ -2,7 +2,7 @@
 ## Title: Power Word: Toolbox
 ## Notes: Various Tooling for Discipline Priests
 ## Author: Clandon
-## Version: 1.0.6
+## Version: 1.1.0
 ## SavedVariables: PowerWordToolboxDB
 
 # Core — namespace, defaults, events, slash commands

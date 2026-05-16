@@ -99,9 +99,7 @@ function AT:ScanUnit(unit)
     if C_UnitAuras.GetAuraDataBySpellID then
         local aura = C_UnitAuras.GetAuraDataBySpellID(unit, ATONEMENT_ID, "HELPFUL")
         if aura and not issecretvalue(aura.spellId) then
-            if TryRegisterAura(guid, aura) then
-                PWT:Debug("AT:ScanUnit: Atonement registered on " .. unit, "atonement")
-            else
+            if not TryRegisterAura(guid, aura) then
                 atTable[guid] = nil
             end
             return
@@ -116,9 +114,7 @@ function AT:ScanUnit(unit)
         local a = C_UnitAuras.GetAuraDataByIndex(unit, i, "HELPFUL")
         if not a then break end
         if not issecretvalue(a.name) and a.name == "Atonement" then
-            if TryRegisterAura(guid, a) then
-                PWT:Debug("AT:ScanUnit: Atonement (name fallback) registered on " .. unit, "atonement")
-            else
+            if not TryRegisterAura(guid, a) then
                 atTable[guid] = nil
             end
             return
@@ -199,7 +195,6 @@ local lastShowLowest = nil
 widget:SetScript("OnUpdate", function(self, delta)
     if not (PWT.db and PWT.db.atonement and PWT.db.atonement.enabled) then return end
 
-    -- Mouse cursor follow runs every frame for smooth tracking.
     if PWT.db.atonement.mouseFollow then
         local cx, cy = GetCursorPosition()
         local scale  = UIParent:GetEffectiveScale()
@@ -280,7 +275,6 @@ function AT:UpdateWidget()
 
     AT.skipNextPositionSave = nil  -- consume the one-shot flag
 
-    -- Set fixed position only when not in mouse-follow mode
     if not cfg.mouseFollow then
         widget:ClearAllPoints()
         widget:SetPoint("CENTER", UIParent, "CENTER", cfg.posX or 0, cfg.posY or 200)
@@ -310,7 +304,6 @@ function AT:UpdateWidget()
     widget:Show()
 
     if cfg.mouseFollow then
-        -- Mouse is controlling position; hide background, disable drag interaction
         widgetBg:SetColorTexture(0, 0, 0, 0)
         widget:SetMovable(false)
         widget:EnableMouse(false)

@@ -71,12 +71,10 @@ local cardTextures = {}
 local pendingTimer = nil
 local pwsSlot      = nil   -- action-bar slot that holds PWS / Void Shield
 
--- Position cache — updated every 5s by positionTicker; written to SavedVariables by SaveState.
--- C_Map APIs are unreliable at logout time, so we cache during active gameplay instead.
-local cachedMapID    = 0
-local cachedX        = 0
-local cachedY        = 0
+-- positionTicker polls UnitPosition every 5s and writes directly to SavedVariables.
+-- Writing during gameplay avoids UnitPosition being unreliable at PLAYER_LOGOUT/PLAYER_CAMPING time.
 local positionTicker = nil
+
 
 -- Cast history ring buffer (CAST_HISTORY_MAX slots, O(1) insert).
 -- Survives natural deck resets; cleared on login/encounter/challenge resets.
@@ -148,8 +146,7 @@ local function ScanButtonFrames()
 end
 
 local function FindPWSSlot()
-    -- Only scan standard action bar slots (1-72); vehicle/override bars (73-180)
-    -- will never hold PWS and scanning them is unnecessary work.
+    -- Scan all 180 slots: 1-72 are Blizzard bars, 73-180 are addon bars (Bartender4, Dominos, ElvUI, etc.)
     for slot = 1, PWS_SLOT_SCAN_MAX do
         local actionType, id = GetActionInfo(slot)
         if actionType == "spell" and (id == PWS_SPELL_ID or id == PWS_PROC_SPELL_ID) then
@@ -362,19 +359,16 @@ function VSD:ApplyCastResult(didProc)
         pendingTimer = nil
     end
 
-    -- If the previous deck's proc was still live when this penance was cast,
-    -- check whether the proc texture was already showing at cast time.
-    -- If it was, we can't distinguish old proc still showing vs new proc fired.
+    -- If the old proc was still live at cast time, check whether the texture was already
+    -- showing. If so, we can't distinguish old proc still showing vs new proc fired.
     if self.oldProcLive then
         local wasProc = self.procTextureAtCast
         self.oldProcLive       = false
         self.procTextureAtCast = false
         if didProc and wasProc then
-            -- This penance drew card 1 of the new deck while the old proc was still
-            -- active. We can't tell if the proc texture is the old proc or a new one.
-            -- Enter unknown state, but count this penance as already drawn (2 remain),
-            -- and set procAvailable=false so the 2 remaining cards use the early-return
-            -- path — keeping the deck countdown correct without false proc detections.
+            -- Ambiguous boundary: proc texture active at cast and again after — can't tell old vs new.
+            -- Count this penance as drawn (2 remain), procAvailable=false keeps skipDetection active
+            -- for the remaining 2 cards so false positives from the old proc don't fire.
             self.cardsRemaining       = MAX_CARDS - 1
             self.procAvailable        = false
             self.procUnconsumed       = true
@@ -389,8 +383,7 @@ function VSD:ApplyCastResult(didProc)
             self:RefreshWidget()
             return
         end
-        -- wasProc=false: old proc was consumed/expired before this penance; detection is clean.
-        -- didProc=false: no new proc regardless; fall through to record N.
+        -- wasProc=false or didProc=false: detection is clean, fall through to record normally.
     end
 
     if didProc then
@@ -409,19 +402,16 @@ function VSD:ApplyCastResult(didProc)
     RecordEvent(didProc and "P" or "N")
     PrintCastHistory()
 
-    -- Ambiguous unknown exit: proc detected on card 2 (cardsRemaining now 1). The old proc was
-    -- already consumed (procUnconsumed was false at cast time, so detection ran), meaning this is
-    -- a genuine new proc. Card 3 is a known no-proc — exit to 0%/1/3 now.
+    -- Proc on card 2 while in ambiguous unknown: old proc was consumed before this cast ran,
+    -- so this is a genuine new proc. Card 3 is guaranteed no-proc — exit unknown now.
     if self.deckUnknownAmbiguous and didProc and self.cardsRemaining == 1 then
         self.deckUnknown          = false
         self.deckUnknownAmbiguous = false
     end
 
     if self.cardsRemaining == 0 then
-        -- Check patterns before resetting — history still contains this outcome.
         self:CheckDesync()
-        -- Only reset if CheckDesync didn't correct the state to a non-zero count.
-        -- If it did correct it, the deck is mid-run and should not be reset.
+        -- CheckDesync may have resynced to non-zero (Pattern 2); only reset if still empty.
         if self.cardsRemaining == 0 then
             self:ResetDeck("deck empty")
         else
@@ -594,7 +584,6 @@ function VSD:UpdateWidget()
     local cardSpacing   = cardW + 6   -- card width + 6px gap between cards
     ApplyCardColors()
 
-    -- Reposition each frame from saved db values.
     local function positionWidget(f, posXKey, posYKey, defaultX, defaultY)
         f:ClearAllPoints()
         f:SetPoint("CENTER", UIParent, "CENTER", cfg[posXKey] or defaultX, cfg[posYKey] or defaultY)
@@ -628,9 +617,7 @@ function VSD:UpdateWidget()
     deckLabel:SetText(deckText)
     deckWidget:SetSize(math.max(60, deckLabel:GetStringWidth() + 10), deckFontSz + 10)
 
-    -- Card visuals: resize and reposition all cards from cfg each update.
-    -- ClearAllPoints is required so switching between horizontal/vertical
-    -- orientations doesn't accumulate conflicting anchor points.
+    -- ClearAllPoints required on each card — accumulates conflicting anchors if orientation is toggled.
     if cfg.cardsRotated then
         -- Vertical stack: cards are taller than wide, stacked top-to-bottom.
         local vertSpacing = cardW + 6
@@ -655,18 +642,15 @@ function VSD:UpdateWidget()
         end
     end
 
-    -- Frame strata.
     chanceWidget:SetFrameStrata(cfg.chanceStrata or "MEDIUM")
     deckWidget:SetFrameStrata(cfg.deckStrata   or "MEDIUM")
     cardsWidget:SetFrameStrata(cfg.cardsStrata  or "MEDIUM")
 
-    -- Per-element show/hide driven by widgetVisible + individual toggles.
     local on = self.widgetVisible
     chanceWidget:SetShown(on and cfg.showChance ~= false)
     deckWidget:SetShown(on and cfg.showDeck ~= false)
     cardsWidget:SetShown(on and cfg.showCards ~= false)
 
-    -- Card slot visuals.
     -- Slots 1 & 2 = no-proc cards, slot 3 = proc card.
     if self.deckUnknown then
         -- Ambiguous unknown tracks cardsRemaining (2 known cards left); full unknown always shows all 3.
@@ -1052,15 +1036,10 @@ function VSD:SaveState()
     for i = castHistorySize - 1, 0, -1 do
         vs.savedCastHistory[castHistorySize - i] = GetHistoryEntry(i)
     end
-    -- Write cached position (polled every 5s during gameplay; always valid at save time).
-    if cachedMapID ~= 0 then
-        vs.savedMapID = cachedMapID
-        vs.savedX     = cachedX
-        vs.savedY     = cachedY
-    end
+    -- savedWorldX/Y/instanceID are kept current by positionTicker (every 5s); no write needed here.
 end
 
-function VSD:RestoreState()
+function VSD:RestoreState(isReload)
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     local vs = PWT.db.voidShieldDeck
     self.cardsRemaining       = vs.savedCardsRemaining
@@ -1076,15 +1055,15 @@ function VSD:RestoreState()
             end
         end
     end
-    -- Consume the saved state so it is not reapplied on a subsequent real login.
-    -- Coords are intentionally left — they persist until overwritten by the next SaveState.
+    -- Coords are intentionally left — they persist until overwritten by the next PollPosition tick.
     vs.savedCardsRemaining       = nil
     vs.savedProcAvailable        = nil
     vs.savedCastHistory          = nil
     vs.savedDeckUnknown          = nil
     vs.savedDeckUnknownAmbiguous = nil
     self.stateInitialized = true
-    PWT:Print("Void Shield deck state restored after reload: "
+    local context = isReload and "after a reload" or "after logging in"
+    PWT:Print("Void Shield deck state restored " .. context .. ": "
         .. self.cardsRemaining .. "/" .. MAX_CARDS .. " cards remaining.")
 end
 
@@ -1106,25 +1085,27 @@ function VSD:EnterUnknownState(reason, chatMsg)
     self:RefreshWidget()
 end
 
+local WORLD_POSITION_THRESHOLD = 50  -- yards; large enough for any DC scenario, immune to map hierarchy differences
+
 local function PollPosition()
-    local mapID = C_Map.GetBestMapForUnit("player")
-    if not mapID or mapID == 0 then return end
-    local pos = C_Map.GetPlayerMapPosition(mapID, "player")
-    if not pos then return end
-    local x, y = pos:GetXY()
-    if not x or not y then return end
-    cachedMapID = mapID
-    cachedX     = x
-    cachedY     = y
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    local posY, posX, _, instanceID = UnitPosition("player")
+    if not posX or not posY then return end
+    local vs = PWT.db.voidShieldDeck
+    vs.savedWorldX     = posX
+    vs.savedWorldY     = posY
+    vs.savedInstanceID = instanceID or 0
 end
 
-local POSITION_THRESHOLD = 0.02   -- 2% of map; absorbs ~5s of movement drift from the poll interval
+-- Returns true (match), false (no match / DC), or nil (position not ready — retry).
 local function CheckPositionMatch(vs)
-    if not vs.savedMapID or vs.savedMapID == 0 then return false end
-    if cachedMapID == 0 then return false end
-    if cachedMapID ~= vs.savedMapID then return false end
-    return math.abs(cachedX - (vs.savedX or 0)) < POSITION_THRESHOLD
-        and math.abs(cachedY - (vs.savedY or 0)) < POSITION_THRESHOLD
+    if not vs.savedWorldX or not vs.savedWorldY then return false end
+    local posY, posX, _, instanceID = UnitPosition("player")
+    if not posX or not posY then return nil end
+    if (instanceID or 0) ~= (vs.savedInstanceID or 0) then return false end
+    local dx = posX - vs.savedWorldX
+    local dy = posY - vs.savedWorldY
+    return math.sqrt(dx * dx + dy * dy) < WORLD_POSITION_THRESHOLD
 end
 
 function VSD:OnEnteringWorld(isReload)
@@ -1132,27 +1113,33 @@ function VSD:OnEnteringWorld(isReload)
     local vs = PWT.db.voidShieldDeck
     if vs.savedCardsRemaining ~= nil then
         local function TryRestore(isRetry)
-            PollPosition()
-            if cachedMapID ~= 0 then
-                if CheckPositionMatch(vs) then
-                    self:RestoreState()
-                else
-                    self:EnterUnknownState(
-                        "potential disconnect or crash detected",
-                        "Void Shield: Potential disconnect or crash detected. Deck state set to Unknown."
-                    )
-                    vs.savedCardsRemaining = nil
-                    vs.savedProcAvailable  = nil
-                    vs.savedCastHistory    = nil
-                end
+            local posMatch = CheckPositionMatch(vs)
+            local posY, posX, _, instanceID = UnitPosition("player")
+            PWT:Debug(string.format(
+                "Void Shield position check: saved=x:%.1f y:%.1f inst:%s  current=x:%.1f y:%.1f inst:%s  dist:%.1f threshold:%d  result:%s",
+                vs.savedWorldX or 0, vs.savedWorldY or 0, tostring(vs.savedInstanceID or 0),
+                posX or 0, posY or 0, tostring(instanceID or 0),
+                (posX and vs.savedWorldX) and math.sqrt((posX - vs.savedWorldX)^2 + (posY - vs.savedWorldY)^2) or -1,
+                WORLD_POSITION_THRESHOLD,
+                tostring(posMatch)
+            ), "voidshield")
+            if posMatch then
+                self:RestoreState(isReload)
                 self:RefreshWidget()
             elseif not isRetry then
                 C_Timer.After(0.5, function() TryRestore(true) end)
             else
-                self:EnterUnknownState(
-                    "position unavailable after login",
-                    "Void Shield: Could not read player position on login. Deck state set to Unknown."
-                )
+                if posMatch == false then
+                    self:EnterUnknownState(
+                        "potential disconnect or crash detected",
+                        "Void Shield: Potential disconnect or crash detected. Deck state set to Unknown."
+                    )
+                else
+                    self:EnterUnknownState(
+                        "position unavailable after login",
+                        "Void Shield: Could not read player position on login. Deck state set to Unknown."
+                    )
+                end
                 vs.savedCardsRemaining = nil
                 vs.savedProcAvailable  = nil
                 vs.savedCastHistory    = nil

@@ -234,6 +234,3 @@ function UI:SyncAtonement()
     end
     UpdateAtLockState()
 end
-
-PWT.isPriest = false
-PWT.isDisc   = false

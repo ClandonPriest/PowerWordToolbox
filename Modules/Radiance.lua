@@ -94,7 +94,6 @@ local function TickCharges(now)
     local elapsed  = now - rechargeStart
     if elapsed >= duration then
         charges = charges + 1
-        PWT:Debug("Radiance charge restored. Charges: " .. charges, "radiance")
         if charges < RADIANCE_MAX_CHARGES then
             -- Advance the anchor so the next charge recharges sequentially.
             rechargeStart = rechargeStart + duration

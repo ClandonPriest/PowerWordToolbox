@@ -350,7 +350,6 @@ function UI:MakeDropdown(parent, options, onSelect, opts)
     local getSelected = opts.getSelected
     local renderRow   = opts.renderRow
 
-    -- Button
     local btn = CreateFrame("Button", nil, parent)
     btn:SetSize(btnW, 24)
 
@@ -383,7 +382,6 @@ function UI:MakeDropdown(parent, options, onSelect, opts)
         btnFill:SetColorTexture(0.12, 0.10, 0.08, 1.0)
     end)
 
-    -- Popup
     local popup = CreateFrame("Frame", nil, UIParent)
     popup:SetSize(popW, popH)
     popup:SetFrameStrata("TOOLTIP")
@@ -720,7 +718,6 @@ function UI:AddTab(name, label, index)
     tab.accent:SetColorTexture(C.accent[1], C.accent[2], C.accent[3], 1)
     tab.accent:Hide()
 
-    -- Icon (uses built-in WoW spell icons — no custom assets)
     local iconTex = TAB_ICONS[name]
     tab.icon = tab:CreateTexture(nil, "ARTWORK")
     tab.icon:SetSize(20, 20)
@@ -739,7 +736,6 @@ function UI:AddTab(name, label, index)
     tab.label:SetTextColor(0.78, 0.75, 0.85, 1.0)
 
     tab:SetScript("OnClick", function()
-        PWT:Debug("Tab clicked: " .. name .. "  disabled=" .. tostring(tabDisabledState[name]))
         SwitchTab(name)
     end)
     tab:SetScript("OnEnter", function(self)
@@ -774,7 +770,6 @@ end
 function UI:SetTabEnabled(name, enabled)
     local tab = tabs[name]
     if not tab then return end
-    PWT:Debug("SetTabEnabled: " .. name .. " -> " .. tostring(enabled))
     local C = UI.C
     tabDisabledState[name] = not enabled
     if enabled then
@@ -808,7 +803,6 @@ end
 
 function UI:RefreshTabStates()
     if not PWT.db then return end
-    PWT:Debug("RefreshTabStates called")
     UI:SetTabEnabled("pi",         PWT.db.piEnabled)
     UI:SetTabEnabled("atonement",  PWT.db.atonement     and PWT.db.atonement.enabled     or false)
     UI:SetTabEnabled("radiance",   PWT.db.radiance       and PWT.db.radiance.enabled       or false)
@@ -872,12 +866,9 @@ AttachOptionsDrag(optionsFrame)
 optionsFrame:SetFrameStrata("DIALOG")
 optionsFrame:SetResizable(true)
 optionsFrame:SetResizeBounds(600, 500)
-PWT:Debug("UI.FRAME_W at creation: " .. tostring(UI.FRAME_W) .. ", FRAME_W local: " .. tostring(FRAME_W))
 optionsFrame:SetSize(FRAME_W, FRAME_H)
-PWT:Debug("Options frame after SetSize: " .. optionsFrame:GetWidth() .. "x" .. optionsFrame:GetHeight())
 optionsFrame:Hide()
 
--- Resize grip
 local resizeGrip = CreateFrame("Button", nil, UIParent)
 resizeGrip:SetSize(18, 18)
 resizeGrip:SetPoint("BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", -2, 2)
@@ -1027,7 +1018,6 @@ contentArea:SetPoint("TOPLEFT",     optionsFrame, "TOPLEFT",     TAB_BAR_W_val +
 contentArea:SetPoint("BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", -PAD,                FOOTER_H)
 UI.contentArea = contentArea
 
--- Footer
 local footer = CreateFrame("Frame", nil, optionsFrame)
 footer:SetPoint("BOTTOMLEFT",  optionsFrame, "BOTTOMLEFT",  0, 0)
 footer:SetPoint("BOTTOMRIGHT", optionsFrame, "BOTTOMRIGHT", 0, 0)
@@ -1059,8 +1049,6 @@ function UI:Toggle()
             optionsFrame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
         end
         optionsFrame:SetSize(FRAME_W, FRAME_H)
-        PWT:Debug("Force options frame size on show: " .. FRAME_W .. "x" .. FRAME_H)
-        PWT:Debug("Showing options window, current size: " .. optionsFrame:GetWidth() .. "x" .. optionsFrame:GetHeight())
         optionsFrame:Show()
     end
 end
