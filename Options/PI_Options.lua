@@ -688,21 +688,14 @@ end, "default")
 soundPreviewBtn:SetSize(60, 22)
 soundPreviewBtn:SetPoint("LEFT", soundDd.button, "RIGHT", 6, 0)
 
-local volRow = UI:MakeSlider(alertContent, "Volume:", 0.0, 1.0, 0.05,
-    function(val) return string.format("%d%%", math.floor(val * 100 + 0.5)) end,
-    function(val) if PWT.db and PWT.db.pi then PWT.db.pi.soundVolume = val end end)
-volRow:SetPoint("TOPLEFT", soundDropLabel, "BOTTOMLEFT", 0, -18)
-volRow:SetPoint("RIGHT",   alertContent, "RIGHT", 0, 0)
-
 local soundResetBtn = UI:MakeButton(alertContent, "Reset Sound", function()
     PWT.db.pi.soundEnabled = true
     PWT.db.pi.soundIndex   = 5
-    PWT.db.pi.soundVolume  = 1.0
     PI_SyncAlerts()
     PWT:Print("Sound settings reset to defaults.")
 end, "default")
 soundResetBtn:SetSize(100, 24)
-soundResetBtn:SetPoint("TOPLEFT", volRow, "BOTTOMLEFT", -22, -10)
+soundResetBtn:SetPoint("TOPLEFT", soundDropLabel, "BOTTOMLEFT", -22, -28)
 
 -- ── Early Request Grace Period ────────────────────────────────────────────
 
@@ -742,7 +735,6 @@ PI_SyncAlerts = function()
     glowEnableCheck.set(cfg.glowEnabled ~= false)
     soundEnableCheck.set(cfg.soundEnabled ~= false)
     pulseSlider:SetValue(cfg.glowPulse or 0.6)
-    volRow.set(cfg.soundVolume or 1.0)
     PWT.PI:BuildSoundList()
     UpdateDropLabel()
     UpdateStyleButtons()

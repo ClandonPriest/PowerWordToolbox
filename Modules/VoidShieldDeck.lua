@@ -803,26 +803,15 @@ end
 
 function VSD:PlayProcSound()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
-    local cfg  = PWT.db.voidShieldDeck
-    local idx  = cfg.procSoundIndex  or 5
+    local cfg   = PWT.db.voidShieldDeck
+    local idx   = cfg.procSoundIndex  or 5
     local entry = soundList[idx]
-    local vol  = cfg.procSoundVolume  or 1.0
     local chan  = cfg.procSoundChannel or "SFX"
-
-    -- SetCVar is expensive; skip if volume is already at the desired level.
-    local prev = GetCVar("Sound_SFXVolume")
-    local needsVolChange = math.abs((tonumber(prev) or 1.0) - vol) > 0.001
-    if needsVolChange then SetCVar("Sound_SFXVolume", tostring(vol)) end
-
     if entry and entry.sType == "lsm" then
         PlaySoundFile(entry.path, chan)
     else
         local preset = VSD_SOUNDS[idx] or VSD_SOUNDS[5]
         PlaySound(preset.id, chan, false)
-    end
-
-    if needsVolChange then
-        C_Timer.After(0.5, function() SetCVar("Sound_SFXVolume", prev) end)
     end
 end
 

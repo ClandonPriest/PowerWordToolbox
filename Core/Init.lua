@@ -26,7 +26,6 @@ PWT.defaults = {
         glowPulse       = 0.6,
         soundEnabled    = true,
         soundIndex      = 5,
-        soundVolume     = 1.0,
         soundChannel    = "SFX",
         overlayEnabled       = false,
         overlayPosX          = nil,
@@ -78,7 +77,6 @@ PWT.defaults = {
         -- Proc sound alert
         procSoundEnabled = false,
         procSoundIndex   = 5,
-        procSoundVolume  = 1.0,
         procSoundChannel = "SFX",
         -- Reload state persistence (written on PLAYER_LOGOUT, consumed on reload)
         savedCardsRemaining = nil,
@@ -180,8 +178,8 @@ local function MigrateDB()
         if pi.glowPulse       == nil then pi.glowPulse       = 0.6  end
         if pi.soundEnabled    == nil then pi.soundEnabled    = true end
         if pi.soundIndex      == nil then pi.soundIndex      = 5 end
-        if pi.soundVolume     == nil then pi.soundVolume     = 1.0 end
         if pi.soundChannel    == nil then pi.soundChannel    = "SFX" end
+        pi.soundVolume = nil
         if pi.overlayEnabled      == nil then pi.overlayEnabled      = false end
         if pi.overlayFontSize     == nil then pi.overlayFontSize     = 24    end
         if pi.earlyRequestEnabled == nil then pi.earlyRequestEnabled = true end
@@ -230,8 +228,8 @@ local function MigrateDB()
         if vs.procAlertStrata  == nil then vs.procAlertStrata  = "HIGH"   end
         if vs.procSoundEnabled == nil then vs.procSoundEnabled = false    end
         if vs.procSoundIndex   == nil then vs.procSoundIndex   = 5        end
-        if vs.procSoundVolume  == nil then vs.procSoundVolume  = 1.0      end
         if vs.procSoundChannel == nil then vs.procSoundChannel = "SFX"    end
+        vs.procSoundVolume = nil
         -- savedCardsRemaining/savedProcAvailable/savedCastHistory/savedMapID/savedX/savedY
         -- intentionally left nil here; written by SaveState, consumed by OnEnteringWorld.
         -- posX/posY were replaced by per-element positions; remove legacy keys

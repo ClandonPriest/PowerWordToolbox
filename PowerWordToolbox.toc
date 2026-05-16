@@ -1,8 +1,8 @@
-## Interface: 120001
+## Interface: 120005
 ## Title: Power Word: Toolbox
 ## Notes: Various Tooling for Discipline Priests
 ## Author: Clandon
-## Version: 1.1.0
+## Version: 1.1.1
 ## SavedVariables: PowerWordToolboxDB
 
 # Core — namespace, defaults, events, slash commands

@@ -76,10 +76,7 @@ end
 function PI:PlayCurrentSound()
     local idx   = PWT.db.pi.soundIndex or 5
     local entry = soundList[idx]
-    local vol   = PWT.db.pi.soundVolume or 1.0
     local chan  = PWT.db.pi.soundChannel or "SFX"
-    local prev  = GetCVar("Sound_SFXVolume")
-    SetCVar("Sound_SFXVolume", tostring(vol))
     if entry and entry.sType == "lsm" then
         PWT:Debug("Playing LSM sound: " .. entry.label, "pi")
         PlaySoundFile(entry.path, chan)
@@ -88,7 +85,6 @@ function PI:PlayCurrentSound()
         PWT:Debug("Playing preset sound: " .. preset.label, "pi")
         PlaySound(preset.id, chan, false)
     end
-    C_Timer.After(0.5, function() SetCVar("Sound_SFXVolume", prev) end)
 end
 
 -- Glow
@@ -110,12 +106,9 @@ function PI:ApplyGlow(frame, playerName)
 
     -- Sound
     if cfg.soundEnabled ~= false then
-        local idx     = cfg.soundIndex or 5
-        local entry   = soundList[idx]
-        local vol     = cfg.soundVolume or 1.0
-        local chan    = cfg.soundChannel or "SFX"
-        local prev    = GetCVar("Sound_SFXVolume")
-        SetCVar("Sound_SFXVolume", tostring(vol))
+        local idx   = cfg.soundIndex or 5
+        local entry = soundList[idx]
+        local chan  = cfg.soundChannel or "SFX"
         if entry and entry.sType == "lsm" then
             PWT:Debug("Playing LSM sound: " .. entry.label, "pi")
             PlaySoundFile(entry.path, chan)
@@ -124,7 +117,6 @@ function PI:ApplyGlow(frame, playerName)
             PWT:Debug("Playing preset sound: " .. preset.label, "pi")
             PlaySound(preset.id, chan, false)
         end
-        C_Timer.After(0.5, function() SetCVar("Sound_SFXVolume", prev) end)
     end
 
     -- Glow visual

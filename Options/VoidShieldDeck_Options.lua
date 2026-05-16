@@ -27,7 +27,7 @@ vsScroll:SetScript("OnMouseWheel", function(self, delta)
 end)
 
 -- Total pixel height of static content. Update if sections are added/removed.
-local VS_CONTENT_H = 1440
+local VS_CONTENT_H = 1396
 
 local vsContent = CreateFrame("Frame", nil, vsScroll)
 vsContent:SetWidth(CONTENT_W)
@@ -660,14 +660,6 @@ end, "default")
 procSoundPreviewBtn:SetSize(60, 22)
 procSoundPreviewBtn:SetPoint("LEFT", procSoundDd.button, "RIGHT", 6, 0)
 
-local procVolSlider = UI:MakeSlider(vsContent, "Volume:", 0.0, 1.0, 0.05,
-    function(val) return string.format("%d%%", math.floor(val * 100 + 0.5)) end,
-    function(val)
-        if PWT.db then PWT.db.voidShieldDeck.procSoundVolume = val end
-    end)
-procVolSlider:SetPoint("TOPLEFT", procSoundPickRow, "BOTTOMLEFT", 0, -8)
-procVolSlider:SetPoint("RIGHT",   vsContent, "RIGHT", -PAD, 0)
-
 local VSD_CHANNELS = {
     { label = "SFX (Default)", value = "SFX"      },
     { label = "Master",        value = "Master"    },
@@ -678,7 +670,7 @@ local VSD_CHANNELS = {
 
 local procChanRow = CreateFrame("Frame", nil, vsContent)
 procChanRow:SetHeight(24)
-procChanRow:SetPoint("TOPLEFT", procVolSlider, "BOTTOMLEFT", 0, -8)
+procChanRow:SetPoint("TOPLEFT", procSoundPickRow, "BOTTOMLEFT", 0, -8)
 procChanRow:SetPoint("RIGHT",   vsContent, "RIGHT", -PAD, 0)
 
 local procChanLbl = procChanRow:CreateFontString(nil, "OVERLAY", "PWT_FontSmall")
@@ -744,8 +736,6 @@ function UI:SyncVoidShield()
     local sndName = (list[idx] and list[idx].label) or "Alarm Clock"
     if #sndName > 26 then sndName = sndName:sub(1, 23) .. "..." end
     procSoundDd.setLabel(sndName)
-
-    procVolSlider.set(cfg.procSoundVolume or 1.0)
 
     local curChan = cfg.procSoundChannel or "SFX"
     for _, e in ipairs(VSD_CHANNELS) do
