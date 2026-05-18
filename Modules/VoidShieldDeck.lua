@@ -82,6 +82,40 @@ local castHistory     = {}   -- ring buffer slots 1..CAST_HISTORY_MAX
 local castHistoryHead = 0    -- index of most recently written slot (0 = empty)
 local castHistorySize = 0    -- number of valid entries currently in the buffer
 
+-- Talent gate: true only when Master the Darkness is learned.
+local hasTalent = false
+
+local function VSD_GetNodeTalentName(configID, nodeID)
+    local nodeInfo = C_Traits.GetNodeInfo(configID, nodeID)
+    if not nodeInfo or not nodeInfo.ranksPurchased
+       or nodeInfo.ranksPurchased == 0
+       or not nodeInfo.activeEntry then
+        return nil
+    end
+    local entryInfo = C_Traits.GetEntryInfo(configID, nodeInfo.activeEntry.entryID)
+    if not entryInfo or not entryInfo.definitionID then return nil end
+    if not C_Traits.GetDefinitionInfo then return nil end
+    local defInfo = C_Traits.GetDefinitionInfo(entryInfo.definitionID)
+    if not defInfo or not defInfo.spellID then return nil end
+    return C_Spell.GetSpellName(defInfo.spellID)
+end
+
+local function ScanForMasterTheDarkness()
+    if not (C_ClassTalents and C_Traits and C_Spell) then return false end
+    local configID = C_ClassTalents.GetActiveConfigID()
+    if not configID then return false end
+    local specID = GetSpecializationInfo(GetSpecialization() or 0)
+    local treeID = specID and C_ClassTalents.GetTraitTreeForSpec(specID)
+    if not treeID then return false end
+    local nodeIDs = C_Traits.GetTreeNodes(treeID)
+    if not nodeIDs then return false end
+    for _, nodeID in ipairs(nodeIDs) do
+        local ok, name = pcall(VSD_GetNodeTalentName, configID, nodeID)
+        if ok and name == "Master the Darkness" then return true end
+    end
+    return false
+end
+
 local function GetHistoryEntry(offset)
     if offset >= castHistorySize then return nil end
     local idx = ((castHistoryHead - 1 - offset) % CAST_HISTORY_MAX) + 1
@@ -993,7 +1027,7 @@ function VSD:OnSpellCast(unit, spellID)
     if unit ~= "player" then return end
     if not PWT.db or not PWT.db.voidShieldDeck then return end
     if not PWT.db.voidShieldDeck.enabled then return end
-    if not PWT.isDisc then return end
+    if not PWT.isDisc or not hasTalent then return end
 
     -- PWS cast (base or Void Shield proc) while alert is active → dismiss it.
     if spellID == PWS_SPELL_ID or spellID == PWS_PROC_SPELL_ID then
@@ -1139,8 +1173,33 @@ function VSD:OnEnteringWorld(isReload)
     end
 end
 
+function VSD:DetectMasterTheDarkness()
+    local ok, result = pcall(ScanForMasterTheDarkness)
+    hasTalent = ok and result or false
+    PWT:Debug("VSD talent check: hasTalent=" .. tostring(hasTalent), "voidshield")
+end
+
+function VSD:OnTalentUpdate()
+    if not PWT.db or not PWT.db.voidShieldDeck then return end
+    self:DetectMasterTheDarkness()
+    if PWT.isDisc and hasTalent and PWT.db.voidShieldDeck.enabled then
+        self:ShowWidget()
+    else
+        self:HideWidget()
+    end
+end
+
+function VSD:OnModuleEnabled()
+    self:DetectMasterTheDarkness()
+    if hasTalent then
+        self:EnterUnknownState("module enabled")
+        self:ShowWidget()
+    end
+end
+
 function VSD:OnLogin()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
+    self:DetectMasterTheDarkness()
 
     self:BuildSoundList()
     BuildButtonFrameCache()
@@ -1157,18 +1216,19 @@ function VSD:OnLogin()
        or self.stateInitialized
        or self.deckUnknown then
         pwsSlot = FindPWSSlot()
-        if vs.enabled and PWT.isDisc then self:ShowWidget() end
+        if vs.enabled and PWT.isDisc and hasTalent then self:ShowWidget() end
         return
     end
     self:EnterUnknownState("login")
     pwsSlot = FindPWSSlot()
-    if vs.enabled and PWT.isDisc then self:ShowWidget() end
+    if vs.enabled and PWT.isDisc and hasTalent then self:ShowWidget() end
 end
 
 function VSD:OnSpecChange()
     if not PWT.db or not PWT.db.voidShieldDeck then return end
+    self:DetectMasterTheDarkness()
     pwsSlot = FindPWSSlot()
-    if PWT.isDisc and PWT.db.voidShieldDeck.enabled then
+    if PWT.isDisc and hasTalent and PWT.db.voidShieldDeck.enabled then
         self:ShowWidget()
     else
         self:HideWidget()

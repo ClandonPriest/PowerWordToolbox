@@ -325,6 +325,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "PLAYER_TALENT_UPDATE" or event == "TRAIT_CONFIG_UPDATED" then
         PWT:Debug("Talent event fired: " .. event, "radiance")
         if PWT.isDisc and PWT.Radiance then PWT.Radiance:DetectBrightPupil() end
+        if PWT.isDisc and PWT.VoidShieldDeck then PWT.VoidShieldDeck:OnTalentUpdate() end
 
     elseif event == "CHAT_MSG_WHISPER" then
         if not PWT.isPriest then return end

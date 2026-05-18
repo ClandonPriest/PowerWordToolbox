@@ -74,8 +74,7 @@ local modVSCheck = UI:MakeCheckbox(genContent, "Void Shield Deck", nil, function
     PWT.db.voidShieldDeck.enabled = val
     if val then
         if PWT.isDisc and PWT.VoidShieldDeck then
-            PWT.VoidShieldDeck:EnterUnknownState("module enabled")
-            PWT.VoidShieldDeck:ShowWidget()
+            PWT.VoidShieldDeck:OnModuleEnabled()
         end
     else
         if PWT.VoidShieldDeck then PWT.VoidShieldDeck:HideWidget() end
